@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lab-manager
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: LAB_MANAGER_DATA_DIR
+        value: /var/data/lab-manager
+    disk:
+      name: lab-manager-data
+      mountPath: /var/data/lab-manager
+      sizeGB: 10

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+server/data/lab-data.json
+android/.gradle/
+android/.idea/
+android/app/build/
+android/build/
+android/local.properties
+.capacitor/
+.env*.local
+.env
+tsconfig.node.tsbuildinfo
+*.jks
+*.keystore
