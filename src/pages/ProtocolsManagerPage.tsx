@@ -14,6 +14,7 @@ import {
 } from '@/lib/types';
 
 interface ProtocolStepFormState {
+  id: string;
   title: string;
   description: string;
   duration: string;
@@ -49,6 +50,21 @@ const difficultyToneClassName: Record<ProtocolDifficulty, string> = {
   hard: 'bg-rose-100 text-rose-700',
 };
 
+function createStepFormState(step: Partial<Omit<ProtocolStepFormState, 'id'>> = {}): ProtocolStepFormState {
+  const id =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `step_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
+  return {
+    id,
+    title: step.title ?? '',
+    description: step.description ?? '',
+    duration: step.duration ?? '',
+    materialsText: step.materialsText ?? '',
+  };
+}
+
 function toFormState(protocol: Protocol): ProtocolFormState {
   return {
     title: protocol.title,
@@ -56,7 +72,7 @@ function toFormState(protocol: Protocol): ProtocolFormState {
     description: protocol.description,
     estimatedTime: protocol.estimatedTime,
     difficulty: protocol.difficulty,
-    steps: protocol.steps.map((step) => ({
+    steps: protocol.steps.map((step) => createStepFormState({
       title: step.title,
       description: step.description,
       duration: step.duration,
@@ -74,7 +90,7 @@ function emptyFormState(): ProtocolFormState {
     description: draft.description,
     estimatedTime: draft.estimatedTime,
     difficulty: draft.difficulty,
-    steps: draft.steps.map((step) => ({
+    steps: draft.steps.map((step) => createStepFormState({
       title: step.title,
       description: step.description,
       duration: step.duration,
@@ -156,7 +172,7 @@ export default function ProtocolsManagerPage({
   const addStep = () => {
     setForm((current) => ({
       ...current,
-      steps: [...current.steps, { title: '', description: '', duration: '', materialsText: '' }],
+      steps: [...current.steps, createStepFormState()],
     }));
   };
 
@@ -166,7 +182,7 @@ export default function ProtocolsManagerPage({
 
       return {
         ...current,
-        steps: nextSteps.length > 0 ? nextSteps : [{ title: '', description: '', duration: '', materialsText: '' }],
+        steps: nextSteps.length > 0 ? nextSteps : [createStepFormState()],
       };
     });
   };
@@ -448,7 +464,7 @@ export default function ProtocolsManagerPage({
 
           <div className="space-y-4">
             {form.steps.map((step, index) => (
-              <div key={`${index}-${step.title}`} className="rounded-2xl bg-slate-50 p-4">
+              <div key={step.id} className="rounded-2xl bg-slate-50 p-4">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div className="text-sm font-semibold text-slate-700">手順 {index + 1}</div>
                   <button
