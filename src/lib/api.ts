@@ -499,9 +499,27 @@ export const authAPI = {
 export const accessAPI = {
   async getWorkspaceAccess(): Promise<WorkspaceAccess> {
     const client = getClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await client.auth.getUser();
+    const email = user?.email?.trim();
+
+    if (userError) {
+      throw new Error(getErrorMessage(userError, 'ログイン中のユーザーを確認できませんでした。'));
+    }
+
+    if (!email) {
+      return {
+        allowed: false,
+        role: null,
+      };
+    }
+
     const { data, error } = await client
       .from('workspace_members')
       .select('email, role')
+      .ilike('email', email)
       .limit(1);
 
     if (error) {
@@ -509,7 +527,11 @@ export const accessAPI = {
       const code = error.code ?? '';
 
       if (code === 'PGRST204' || message.includes('role')) {
-        const fallback = await client.from('workspace_members').select('email').limit(1);
+        const fallback = await client
+          .from('workspace_members')
+          .select('email')
+          .ilike('email', email)
+          .limit(1);
 
         if (fallback.error) {
           throw new Error(getErrorMessage(fallback.error, '研究室メンバー権限を確認できませんでした。'));
