@@ -5,6 +5,7 @@ import AuthPage from '@/components/AuthPage';
 import Navigation from '@/components/Navigation';
 import PasswordRecoveryPage from '@/components/PasswordRecoveryPage';
 import SetupRequiredPage from '@/components/SetupRequiredPage';
+import AdminSettingsPage from '@/pages/AdminSettingsPage';
 import DashboardPage from '@/pages/DashboardPage';
 import InventoryManagerPage from '@/pages/InventoryManagerPage';
 import OrdersManagerPage from '@/pages/OrdersManagerPage';
@@ -12,7 +13,7 @@ import ProtocolsManagerPage from '@/pages/ProtocolsManagerPage';
 import { accessAPI, authAPI } from '@/lib/api';
 import { useLabManager } from '@/hooks/useLabManager';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import type { Page } from '@/lib/types';
+import type { Page, WorkspaceRole } from '@/lib/types';
 
 type AccessState = 'idle' | 'checking' | 'granted' | 'denied';
 type AuthFlow = 'default' | 'recovery';
@@ -44,7 +45,9 @@ function App() {
   const [authFlow, setAuthFlow] = useState<AuthFlow>('default');
   const [accessState, setAccessState] = useState<AccessState>('idle');
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const isAppReady = Boolean(session) && accessState === 'granted';
+  const isAdmin = workspaceRole === 'admin';
 
   const {
     snapshot,
@@ -54,6 +57,9 @@ function App() {
     createInventoryItem,
     updateInventoryItem,
     deleteInventoryItem,
+    createStorageLocation,
+    updateStorageLocation,
+    deleteStorageLocation,
     createOrder,
     updateOrder,
     deleteOrder,
@@ -149,6 +155,7 @@ function App() {
     if (!session) {
       setAccessState('idle');
       setAccessError(null);
+      setWorkspaceRole(null);
       setCurrentPage('home');
       return;
     }
@@ -159,13 +166,14 @@ function App() {
     setAccessError(null);
 
     void accessAPI
-      .hasWorkspaceAccess()
-      .then((allowed) => {
+      .getWorkspaceAccess()
+      .then((access) => {
         if (!active) {
           return;
         }
 
-        setAccessState(allowed ? 'granted' : 'denied');
+        setAccessState(access.allowed ? 'granted' : 'denied');
+        setWorkspaceRole(access.role);
       })
       .catch((error) => {
         if (!active) {
@@ -173,6 +181,7 @@ function App() {
         }
 
         setAccessState('denied');
+        setWorkspaceRole(null);
         setAccessError(error instanceof Error ? error.message : 'アクセス権を確認できませんでした。');
       });
 
@@ -180,6 +189,12 @@ function App() {
       active = false;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (currentPage === 'admin' && !isAdmin) {
+      setCurrentPage('home');
+    }
+  }, [currentPage, isAdmin]);
 
   const handleSignIn = useCallback(async (email: string, password: string) => {
     setAuthSubmitting(true);
@@ -302,9 +317,26 @@ function App() {
             saving={saving}
             error={error}
             lastSyncAt={snapshot?.updatedAt ?? null}
+            locationOptions={(snapshot?.storageLocations ?? [])
+              .filter((location) => location.isActive)
+              .map((location) => location.name)}
             onCreate={createInventoryItem}
             onUpdate={updateInventoryItem}
             onDelete={deleteInventoryItem}
+          />
+        );
+      case 'admin':
+        return (
+          <AdminSettingsPage
+            locations={snapshot?.storageLocations ?? []}
+            inventoryItems={snapshot?.inventory ?? []}
+            loading={loading}
+            saving={saving}
+            error={error}
+            lastSyncAt={snapshot?.updatedAt ?? null}
+            onCreateLocation={createStorageLocation}
+            onUpdateLocation={updateStorageLocation}
+            onDeleteLocation={deleteStorageLocation}
           />
         );
       case 'orders':
@@ -431,7 +463,7 @@ function App() {
       </header>
 
       <div className="mx-auto flex max-w-7xl flex-col md:min-h-[calc(100vh-97px)] md:flex-row">
-        <Navigation currentPage={currentPage} onPageChange={setCurrentPage} />
+        <Navigation currentPage={currentPage} onPageChange={setCurrentPage} isAdmin={isAdmin} />
         <main className="flex-1">{renderPage()}</main>
       </div>
     </div>

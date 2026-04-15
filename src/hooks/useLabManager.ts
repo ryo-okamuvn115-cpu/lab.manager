@@ -5,6 +5,7 @@ import type {
   LabSnapshot,
   OrderDraft,
   ProtocolDraft,
+  StorageLocationDraft,
 } from '@/lib/types';
 
 function toError(error: unknown) {
@@ -104,6 +105,12 @@ export function useLabManager(enabled: boolean) {
         runMutation(() => storageAPI.updateInventoryItem(id, payload)),
       deleteInventoryItem: (id: string) =>
         runMutation(() => storageAPI.deleteInventoryItem(id)),
+      createStorageLocation: (payload: StorageLocationDraft) =>
+        runMutation(() => storageAPI.createStorageLocation(payload)),
+      updateStorageLocation: (id: string, payload: StorageLocationDraft, previousName?: string) =>
+        runMutation(() => storageAPI.updateStorageLocation(id, payload, previousName)),
+      deleteStorageLocation: (id: string) =>
+        runMutation(() => storageAPI.deleteStorageLocation(id)),
       createOrder: (payload: OrderDraft) => runMutation(() => storageAPI.createOrder(payload)),
       updateOrder: (id: string, payload: OrderDraft) =>
         runMutation(() => storageAPI.updateOrder(id, payload)),

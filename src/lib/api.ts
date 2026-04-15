@@ -20,6 +20,10 @@ import type {
   ProtocolDraft,
   ProtocolStep,
   SnapshotEvent,
+  StorageLocation,
+  StorageLocationDraft,
+  WorkspaceAccess,
+  WorkspaceRole,
 } from '@/lib/types';
 
 interface InventoryRow {
@@ -61,6 +65,21 @@ interface ProtocolRow {
   difficulty: ProtocolDifficulty;
   created_at: string;
   updated_at: string;
+}
+
+interface StorageLocationRow {
+  id: string;
+  name: string;
+  details: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WorkspaceMemberRow {
+  email: string;
+  role: WorkspaceRole | null;
 }
 
 interface AuthCredentials {
@@ -132,7 +151,15 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
 
   if (code === 'PGRST205' || message.includes('Could not find the table')) {
-    return 'Supabase の初期設定が未完了です。`supabase/schema.sql` を実行してください。';
+    return 'Supabase のテーブル設定が未完了です。`supabase/schema.sql` または `supabase/add_admin_storage_locations.sql` を実行してください。';
+  }
+
+  if (
+    message.includes('storage_locations')
+    || message.includes('role')
+    || message.includes('is_workspace_admin')
+  ) {
+    return '管理者画面用の設定がまだ Supabase に追加されていません。`supabase/add_admin_storage_locations.sql` を実行してください。';
   }
 
   if (
@@ -186,6 +213,18 @@ function mapInventoryRow(row: InventoryRow): InventoryItem {
     locationImagePath,
     locationImageUrl: locationImagePath ? getInventoryLocationImageUrl(locationImagePath) : null,
     notes: row.notes ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapStorageLocationRow(row: StorageLocationRow): StorageLocation {
+  return {
+    id: row.id,
+    name: row.name,
+    details: row.details ?? '',
+    sortOrder: normalizeNumber(row.sort_order),
+    isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -309,6 +348,15 @@ function prepareInventoryPayload(payload: InventoryItemDraft) {
     location_detail: payload.locationDetail.trim(),
     location_image_path: payload.locationImagePath.trim(),
     notes: payload.notes.trim(),
+  };
+}
+
+function prepareStorageLocationPayload(payload: StorageLocationDraft) {
+  return {
+    name: payload.name.trim(),
+    details: payload.details.trim(),
+    sort_order: normalizeNumber(payload.sortOrder),
+    is_active: payload.isActive,
   };
 }
 
@@ -449,15 +497,44 @@ export const authAPI = {
 };
 
 export const accessAPI = {
-  async hasWorkspaceAccess() {
+  async getWorkspaceAccess(): Promise<WorkspaceAccess> {
     const client = getClient();
-    const { data, error } = await client.from('workspace_members').select('email').limit(1);
+    const { data, error } = await client
+      .from('workspace_members')
+      .select('email, role')
+      .limit(1);
 
     if (error) {
+      const message = error.message ?? '';
+      const code = error.code ?? '';
+
+      if (code === 'PGRST204' || message.includes('role')) {
+        const fallback = await client.from('workspace_members').select('email').limit(1);
+
+        if (fallback.error) {
+          throw new Error(getErrorMessage(fallback.error, '研究室メンバー権限を確認できませんでした。'));
+        }
+
+        return {
+          allowed: (fallback.data ?? []).length > 0,
+          role: (fallback.data ?? []).length > 0 ? 'member' : null,
+        };
+      }
+
       throw new Error(getErrorMessage(error, '研究室メンバー権限を確認できませんでした。'));
     }
 
-    return (data ?? []).length > 0;
+    const member = (data ?? [])[0] as WorkspaceMemberRow | undefined;
+
+    return {
+      allowed: Boolean(member),
+      role: member?.role === 'admin' ? 'admin' : member ? 'member' : null,
+    };
+  },
+
+  async hasWorkspaceAccess() {
+    const access = await this.getWorkspaceAccess();
+    return access.allowed;
   },
 };
 
@@ -498,17 +575,111 @@ export const storageAPI = {
     }
   },
 
+  async createStorageLocation(payload: StorageLocationDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('storage_locations')
+      .insert(prepareStorageLocationPayload(payload))
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '保管場所を追加できませんでした。'));
+    }
+
+    return mapStorageLocationRow(data as StorageLocationRow);
+  },
+
+  async updateStorageLocation(id: string, payload: StorageLocationDraft, previousName?: string) {
+    const client = getClient();
+    const nextPayload = prepareStorageLocationPayload(payload);
+    const { data, error } = await client
+      .from('storage_locations')
+      .update(nextPayload)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '保管場所を更新できませんでした。'));
+    }
+
+    const nextLocation = mapStorageLocationRow(data as StorageLocationRow);
+    const oldName = previousName?.trim();
+
+    if (oldName && oldName !== nextLocation.name) {
+      const affected = await client
+        .from('inventory_items')
+        .select('id, location_detail')
+        .eq('location_preset', oldName);
+
+      if (affected.error) {
+        throw new Error(getErrorMessage(affected.error, '既存在庫の保管場所名を更新できませんでした。'));
+      }
+
+      const updates = (affected.data ?? []).map((row) => {
+        const locationDetail = typeof row.location_detail === 'string' ? row.location_detail : '';
+        return client
+          .from('inventory_items')
+          .update({
+            location_preset: nextLocation.name,
+            location: buildInventoryLocation(nextLocation.name, locationDetail),
+          })
+          .eq('id', row.id);
+      });
+
+      const results = await Promise.all(updates);
+      const failed = results.find((result) => result.error);
+
+      if (failed?.error) {
+        throw new Error(getErrorMessage(failed.error, '既存在庫の保管場所名を更新できませんでした。'));
+      }
+    }
+
+    return nextLocation;
+  },
+
+  async deleteStorageLocation(id: string) {
+    const client = getClient();
+    const { error } = await client.from('storage_locations').delete().eq('id', id);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '保管場所を削除できませんでした。'));
+    }
+
+    return { success: true as const };
+  },
+
   async getSnapshot(): Promise<LabSnapshot> {
     const client = getClient();
 
-    const [inventoryResponse, ordersResponse, protocolsResponse] = await Promise.all([
+    const [inventoryResponse, storageLocationsResponse, ordersResponse, protocolsResponse] = await Promise.all([
       client.from('inventory_items').select('*').order('updated_at', { ascending: false }),
+      client
+        .from('storage_locations')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
       client.from('orders').select('*').order('updated_at', { ascending: false }),
       client.from('protocols').select('*').order('updated_at', { ascending: false }),
     ]);
 
     if (inventoryResponse.error) {
       throw new Error(getErrorMessage(inventoryResponse.error, '在庫を読み込めませんでした。'));
+    }
+
+    let storageLocations: StorageLocation[] = [];
+    if (storageLocationsResponse.error) {
+      const message = storageLocationsResponse.error.message ?? '';
+      const code = storageLocationsResponse.error.code ?? '';
+
+      if (!(code === 'PGRST205' || message.includes('storage_locations'))) {
+        throw new Error(getErrorMessage(storageLocationsResponse.error, '保管場所マスタを読み込めませんでした。'));
+      }
+    } else {
+      storageLocations = (storageLocationsResponse.data ?? []).map((row) =>
+        mapStorageLocationRow(row as StorageLocationRow),
+      );
     }
 
     if (ordersResponse.error) {
@@ -525,9 +696,10 @@ export const storageAPI = {
 
     return {
       inventory,
+      storageLocations,
       orders,
       protocols,
-      updatedAt: buildSnapshotUpdatedAt([inventory, orders, protocols]),
+      updatedAt: buildSnapshotUpdatedAt([inventory, storageLocations, orders, protocols]),
     };
   },
 
@@ -668,6 +840,7 @@ export const storageAPI = {
 
     channel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items' }, emitSnapshotUpdate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'storage_locations' }, emitSnapshotUpdate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, emitSnapshotUpdate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'protocols' }, emitSnapshotUpdate)
       .subscribe();

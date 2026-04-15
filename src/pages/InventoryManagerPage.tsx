@@ -23,6 +23,7 @@ interface InventoryManagerPageProps {
   saving: boolean;
   error: Error | null;
   lastSyncAt: string | null;
+  locationOptions?: string[];
   onCreate: (payload: InventoryItemDraft) => Promise<unknown>;
   onUpdate: (id: string, payload: InventoryItemDraft) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
@@ -61,6 +62,7 @@ export default function InventoryManagerPage({
   saving,
   error,
   lastSyncAt,
+  locationOptions = [],
   onCreate,
   onUpdate,
   onDelete,
@@ -76,6 +78,17 @@ export default function InventoryManagerPage({
   const [fileInputKey, setFileInputKey] = useState(0);
 
   const deferredSearch = useDeferredValue(search);
+  const availableLocationPresets = useMemo(() => {
+    const source = locationOptions.length > 0 ? locationOptions : [...INVENTORY_LOCATION_PRESETS];
+    const values = new Set(source.map((location) => location.trim()).filter(Boolean));
+    const currentLocation = form.locationPreset.trim();
+
+    if (currentLocation) {
+      values.add(currentLocation);
+    }
+
+    return Array.from(values);
+  }, [form.locationPreset, locationOptions]);
 
   useEffect(() => {
     if (!selectedLocationImage) {
@@ -558,7 +571,7 @@ export default function InventoryManagerPage({
                   className={inputClassName}
                 >
                   <option value="">保管場所を選択</option>
-                  {INVENTORY_LOCATION_PRESETS.map((locationPreset) => (
+                  {availableLocationPresets.map((locationPreset) => (
                     <option key={locationPreset} value={locationPreset}>
                       {locationPreset}
                     </option>

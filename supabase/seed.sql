@@ -25,6 +25,33 @@ set
   created_at = excluded.created_at,
   updated_at = excluded.updated_at;
 
+insert into public.storage_locations (name, details, sort_order, is_active)
+values
+  ('-30℃冷凍庫(白色)', '', 10, true),
+  ('-30℃冷凍庫（番号34）', '', 20, true),
+  ('-30℃冷凍庫（番号35）', '', 30, true),
+  ('-30℃冷凍庫（番号36）', '', 40, true),
+  ('-30℃冷凍庫（番号37）', '', 50, true),
+  ('-80℃冷凍庫44', '', 60, true),
+  ('-80℃冷凍庫45', '', 70, true),
+  ('-80℃冷凍庫46', '', 80, true),
+  ('4℃冷蔵庫（番号16）', '', 90, true),
+  ('4℃冷蔵庫（番号17）', '', 100, true),
+  ('4℃冷蔵庫（番号31）', '', 110, true),
+  ('4℃冷蔵庫（番号32）', '', 120, true),
+  ('4℃冷蔵庫（番号33）', '', 130, true),
+  ('4℃冷蔵庫（番号4、培養室）', '', 140, true),
+  ('4℃冷蔵庫（番号5、培養室）', '', 150, true),
+  ('共通試薬棚（培養室前）', '', 160, true),
+  ('外劇物保管棚（ブルー）', '', 170, true),
+  ('液体窒素A', '', 180, true),
+  ('液体窒素B', '', 190, true),
+  ('液体窒素C', '', 200, true),
+  ('液体窒素D', '', 210, true),
+  ('液体窒素E', '', 220, true),
+  ('鍵付きボックス（ビール瓶の鍵）', '', 230, true)
+on conflict do nothing;
+
 insert into public.orders (
   id, order_number, items, total_amount, status, notes, created_at, updated_at
 )

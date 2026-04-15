@@ -2,8 +2,27 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.workspace_members (
   email text primary key,
+  role text not null default 'member',
   created_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.workspace_members
+  add column if not exists role text not null default 'member';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'workspace_members_role_check'
+      and conrelid = 'public.workspace_members'::regclass
+  ) then
+    alter table public.workspace_members
+      add constraint workspace_members_role_check
+      check (role in ('member', 'admin'));
+  end if;
+end;
+$$;
 
 create unique index if not exists workspace_members_email_lower_idx
   on public.workspace_members (lower(email));
@@ -11,12 +30,29 @@ create unique index if not exists workspace_members_email_lower_idx
 create or replace function public.is_workspace_member()
 returns boolean
 language sql
+security definer
+set search_path = public
 stable
 as $$
   select exists (
     select 1
     from public.workspace_members members
     where lower(members.email) = lower(coalesce(auth.jwt()->>'email', ''))
+  );
+$$;
+
+create or replace function public.is_workspace_admin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.workspace_members members
+    where lower(members.email) = lower(coalesce(auth.jwt()->>'email', ''))
+      and members.role = 'admin'
   );
 $$;
 
@@ -47,6 +83,19 @@ create table if not exists public.inventory_items (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+create table if not exists public.storage_locations (
+  id text primary key default ('loc_' || replace(gen_random_uuid()::text, '-', '')),
+  name text not null,
+  details text not null default '',
+  sort_order integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create unique index if not exists storage_locations_name_lower_idx
+  on public.storage_locations (lower(name));
 
 alter table public.inventory_items
   add column if not exists supplier text not null default 'other';
@@ -104,6 +153,12 @@ before update on public.inventory_items
 for each row
 execute function public.set_updated_at();
 
+drop trigger if exists storage_locations_set_updated_at on public.storage_locations;
+create trigger storage_locations_set_updated_at
+before update on public.storage_locations
+for each row
+execute function public.set_updated_at();
+
 drop trigger if exists orders_set_updated_at on public.orders;
 create trigger orders_set_updated_at
 before update on public.orders
@@ -118,6 +173,7 @@ execute function public.set_updated_at();
 
 alter table public.workspace_members enable row level security;
 alter table public.inventory_items enable row level security;
+alter table public.storage_locations enable row level security;
 alter table public.orders enable row level security;
 alter table public.protocols enable row level security;
 
@@ -127,6 +183,14 @@ on public.workspace_members
 for select
 to authenticated
 using (lower(email) = lower(coalesce(auth.jwt()->>'email', '')));
+
+drop policy if exists "Admins can manage workspace members" on public.workspace_members;
+create policy "Admins can manage workspace members"
+on public.workspace_members
+for all
+to authenticated
+using (public.is_workspace_admin())
+with check (public.is_workspace_admin());
 
 drop policy if exists "Approved members can read inventory" on public.inventory_items;
 create policy "Approved members can read inventory"
@@ -156,6 +220,35 @@ on public.inventory_items
 for delete
 to authenticated
 using (public.is_workspace_member());
+
+drop policy if exists "Approved members can read storage locations" on public.storage_locations;
+create policy "Approved members can read storage locations"
+on public.storage_locations
+for select
+to authenticated
+using (public.is_workspace_member());
+
+drop policy if exists "Admins can insert storage locations" on public.storage_locations;
+create policy "Admins can insert storage locations"
+on public.storage_locations
+for insert
+to authenticated
+with check (public.is_workspace_admin());
+
+drop policy if exists "Admins can update storage locations" on public.storage_locations;
+create policy "Admins can update storage locations"
+on public.storage_locations
+for update
+to authenticated
+using (public.is_workspace_admin())
+with check (public.is_workspace_admin());
+
+drop policy if exists "Admins can delete storage locations" on public.storage_locations;
+create policy "Admins can delete storage locations"
+on public.storage_locations
+for delete
+to authenticated
+using (public.is_workspace_admin());
 
 drop policy if exists "Approved members can read orders" on public.orders;
 create policy "Approved members can read orders"
@@ -283,6 +376,20 @@ begin
       and tablename = 'inventory_items'
   ) then
     alter publication supabase_realtime add table public.inventory_items;
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'storage_locations'
+  ) then
+    alter publication supabase_realtime add table public.storage_locations;
   end if;
 end;
 $$;

@@ -1,9 +1,10 @@
-export type Page = 'home' | 'inventory' | 'orders' | 'protocols';
+export type Page = 'home' | 'inventory' | 'orders' | 'protocols' | 'admin';
 
 export type InventoryCategory = 'protein' | 'antibody' | 'reagent' | 'other';
 export type InventorySupplier = 'tone-kagaku' | 'ikeda-rika' | 'yaken' | 'ut' | 'other';
 export type OrderStatus = 'draft' | 'submitted' | 'approved' | 'received';
 export type ProtocolDifficulty = 'easy' | 'medium' | 'hard';
+export type WorkspaceRole = 'member' | 'admin';
 
 export const INVENTORY_LOCATION_PRESETS = [
   '-30℃冷凍庫(白色)',
@@ -63,6 +64,23 @@ export interface InventoryItemDraft {
   locationImagePath: string;
   locationImageUrl: string | null;
   notes: string;
+}
+
+export interface StorageLocation {
+  id: string;
+  name: string;
+  details: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StorageLocationDraft {
+  name: string;
+  details: string;
+  sortOrder: number;
+  isActive: boolean;
 }
 
 export interface OrderItem {
@@ -136,9 +154,15 @@ export interface ProtocolDraft {
 
 export interface LabSnapshot {
   inventory: InventoryItem[];
+  storageLocations: StorageLocation[];
   orders: Order[];
   protocols: Protocol[];
   updatedAt: string | null;
+}
+
+export interface WorkspaceAccess {
+  allowed: boolean;
+  role: WorkspaceRole | null;
 }
 
 export interface SnapshotEvent {
@@ -234,6 +258,15 @@ export function createEmptyOrderDraft(): OrderDraft {
         unitPrice: 0,
       },
     ],
+  };
+}
+
+export function createEmptyStorageLocationDraft(): StorageLocationDraft {
+  return {
+    name: '',
+    details: '',
+    sortOrder: 0,
+    isActive: true,
   };
 }
 
