@@ -162,10 +162,10 @@ export default function ProtocolsManagerPage({
     setForm(emptyFormState());
   };
 
-  const updateStep = (index: number, patch: Partial<ProtocolStepFormState>) => {
+  const updateStep = (id: string, patch: Partial<Omit<ProtocolStepFormState, 'id'>>) => {
     setForm((current) => ({
       ...current,
-      steps: current.steps.map((step, stepIndex) => (stepIndex === index ? { ...step, ...patch } : step)),
+      steps: current.steps.map((step) => (step.id === id ? { ...step, ...patch } : step)),
     }));
   };
 
@@ -176,9 +176,9 @@ export default function ProtocolsManagerPage({
     }));
   };
 
-  const removeStep = (index: number) => {
+  const removeStep = (id: string) => {
     setForm((current) => {
-      const nextSteps = current.steps.filter((_, stepIndex) => stepIndex !== index);
+      const nextSteps = current.steps.filter((step) => step.id !== id);
 
       return {
         ...current,
@@ -469,7 +469,7 @@ export default function ProtocolsManagerPage({
                   <div className="text-sm font-semibold text-slate-700">手順 {index + 1}</div>
                   <button
                     type="button"
-                    onClick={() => removeStep(index)}
+                    onClick={() => removeStep(step.id)}
                     className="rounded-lg border border-rose-200 px-3 py-2 text-rose-600 transition hover:bg-rose-50"
                   >
                     <Trash2 size={16} />
@@ -479,8 +479,8 @@ export default function ProtocolsManagerPage({
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <FormField label="手順名">
                     <input
-                      value={step.title}
-                      onChange={(event) => updateStep(index, { title: event.target.value })}
+                      defaultValue={step.title}
+                      onBlur={(event) => updateStep(step.id, { title: event.currentTarget.value })}
                       className={inputClassName}
                     />
                   </FormField>
@@ -488,7 +488,7 @@ export default function ProtocolsManagerPage({
                   <FormField label="所要時間">
                     <input
                       value={step.duration}
-                      onChange={(event) => updateStep(index, { duration: event.target.value })}
+                      onChange={(event) => updateStep(step.id, { duration: event.target.value })}
                       className={inputClassName}
                     />
                   </FormField>
@@ -499,7 +499,7 @@ export default function ProtocolsManagerPage({
                     <textarea
                       rows={3}
                       value={step.description}
-                      onChange={(event) => updateStep(index, { description: event.target.value })}
+                      onChange={(event) => updateStep(step.id, { description: event.target.value })}
                       className={inputClassName}
                     />
                   </FormField>
@@ -510,7 +510,7 @@ export default function ProtocolsManagerPage({
                     <textarea
                       rows={2}
                       value={step.materialsText}
-                      onChange={(event) => updateStep(index, { materialsText: event.target.value })}
+                      onChange={(event) => updateStep(step.id, { materialsText: event.target.value })}
                       className={inputClassName}
                     />
                   </FormField>
