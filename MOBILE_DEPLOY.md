@@ -1,75 +1,50 @@
-# Lab Manager Mobile + Public Deployment
+# Lab Manager Mobile Deployment
 
-## What was added
+現在の Android アプリは、`Supabase` を直接使う構成です。  
+そのため、以前のように Render や Node サーバーを常時立てなくても、アプリ同士で同期できます。
 
-- Capacitor configuration for Android builds
-- Render Blueprint for public deployment
-- Configurable API base URL for native app builds
-- Persistent server data directory support via `LAB_MANAGER_DATA_DIR`
+## 1. 先に Supabase セットアップを済ませる
 
-## 1. Deploy the shared server publicly
+まずは [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) の内容を終わらせます。
 
-This project currently stores shared data in a JSON file.
-That means the deployment target must support persistent disk storage.
+必要なのは次の2つです。
 
-The included `render.yaml` is prepared for Render using:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
-- a Node web service
-- `npm ci && npm run build`
-- `npm run start`
-- a persistent disk mounted at `/var/data/lab-manager`
+## 2. Android 用にビルドする
 
-Important:
+`.env.local` が設定済みなら、そのまま次で大丈夫です。
 
-- Render persistent disks require a paid web service.
-- Without a persistent disk, your lab data will be lost on redeploy/restart.
-
-### Render steps
-
-1. Push this project to GitHub, GitLab, or Bitbucket.
-2. In Render, create a new Blueprint from the repository.
-3. Review `render.yaml`.
-4. Deploy the Blueprint.
-5. After deploy finishes, note the public URL, for example:
-
-   `https://your-lab-manager.onrender.com`
-
-6. Open that URL in a browser and confirm the app loads.
-
-## 2. Point the mobile app at the public server
-
-Before building the Capacitor app, set `VITE_API_BASE_URL` to the public server URL.
-
-Example:
-
-```bash
-$env:VITE_API_BASE_URL="https://your-lab-manager.onrender.com"
+```powershell
 npm run build:android
 ```
 
-If you prefer, create a local env file based on `.env.example`.
+もし PowerShell で一時的に直接指定したいなら、こうでも動きます。
 
-## 3. Create/open the Android project
+```powershell
+$env:VITE_SUPABASE_URL="https://your-project.supabase.co"
+$env:VITE_SUPABASE_ANON_KEY="your-anon-key"
+npm run build:android
+```
 
-Once the Android platform is added, use:
+## 3. Android Studio で開く
 
-```bash
+```powershell
 npm run cap:open:android
 ```
 
-Then build/sign the app from Android Studio.
+その後は Android Studio で次のどちらかです。
 
-## 4. Live reload on a phone during development
+- `Run` で実機またはエミュレータ起動
+- `Build APK` で配布用 APK を作成
 
-If your phone and PC are on the same network, you can use live reload:
+## 4. 実機テスト時のポイント
 
-```bash
-$env:CAPACITOR_LIVE_RELOAD_URL="http://192.168.1.43:5173"
-npm run cap:sync:android
-```
-
-Keep `npm run dev` and `npm run dev:server` running while testing.
+- 研究室メンバーのメールアドレスが `workspace_members` に入っていないとログイン後に入れません
+- Email 認証を有効にしている場合は、確認メールを開いてからログインします
+- Android アプリからも Web 版と同じ Supabase データを見に行くので、編集内容はそのまま同期されます
 
 ## iPhone / iOS note
 
-Capacitor supports iOS, but generating and building the iOS project requires a Mac with Xcode.
+Capacitor supports iOS, but generating and building the iOS project still requires a Mac with Xcode.

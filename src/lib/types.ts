@@ -1,8 +1,35 @@
 export type Page = 'home' | 'inventory' | 'orders' | 'protocols';
 
 export type InventoryCategory = 'protein' | 'antibody' | 'reagent' | 'other';
+export type InventorySupplier = 'tone-kagaku' | 'ikeda-rika' | 'yaken' | 'ut' | 'other';
 export type OrderStatus = 'draft' | 'submitted' | 'approved' | 'received';
 export type ProtocolDifficulty = 'easy' | 'medium' | 'hard';
+
+export const INVENTORY_LOCATION_PRESETS = [
+  '-30℃冷凍庫(白色)',
+  '-30℃冷凍庫（番号34）',
+  '-30℃冷凍庫（番号35）',
+  '-30℃冷凍庫（番号36）',
+  '-30℃冷凍庫（番号37）',
+  '-80℃冷凍庫44',
+  '-80℃冷凍庫45',
+  '-80℃冷凍庫46',
+  '4℃冷蔵庫（番号16）',
+  '4℃冷蔵庫（番号17）',
+  '4℃冷蔵庫（番号31）',
+  '4℃冷蔵庫（番号32）',
+  '4℃冷蔵庫（番号33）',
+  '4℃冷蔵庫（番号4、培養室）',
+  '4℃冷蔵庫（番号5、培養室）',
+  '共通試薬棚（培養室前）',
+  '外劇物保管棚（ブルー）',
+  '液体窒素A',
+  '液体窒素B',
+  '液体窒素C',
+  '液体窒素D',
+  '液体窒素E',
+  '鍵付きボックス（ビール瓶の鍵）',
+] as const;
 
 export interface InventoryItem {
   id: string;
@@ -12,7 +39,12 @@ export interface InventoryItem {
   unit: string;
   minQuantity: number;
   expiryDate: string | null;
+  supplier: InventorySupplier;
   location: string;
+  locationPreset: string;
+  locationDetail: string;
+  locationImagePath: string;
+  locationImageUrl: string | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -25,7 +57,11 @@ export interface InventoryItemDraft {
   unit: string;
   minQuantity: number;
   expiryDate: string;
-  location: string;
+  supplier: InventorySupplier;
+  locationPreset: string;
+  locationDetail: string;
+  locationImagePath: string;
+  locationImageUrl: string | null;
   notes: string;
 }
 
@@ -102,7 +138,7 @@ export interface LabSnapshot {
   inventory: InventoryItem[];
   orders: Order[];
   protocols: Protocol[];
-  updatedAt: string;
+  updatedAt: string | null;
 }
 
 export interface SnapshotEvent {
@@ -126,6 +162,22 @@ export const INVENTORY_CATEGORY_LABELS: Record<InventoryCategory | 'all', string
   other: 'その他',
 };
 
+export const INVENTORY_SUPPLIERS: InventorySupplier[] = [
+  'tone-kagaku',
+  'ikeda-rika',
+  'yaken',
+  'ut',
+  'other',
+];
+
+export const INVENTORY_SUPPLIER_LABELS: Record<InventorySupplier, string> = {
+  'tone-kagaku': '利根化学',
+  'ikeda-rika': '池田理化',
+  yaken: '薬研社',
+  ut: 'UT',
+  other: 'その他',
+};
+
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   draft: '下書き',
   submitted: '申請済み',
@@ -142,6 +194,17 @@ export const PROTOCOL_DIFFICULTY_LABELS: Record<ProtocolDifficulty, string> = {
 export const ORDER_STATUSES: OrderStatus[] = ['draft', 'submitted', 'approved', 'received'];
 export const PROTOCOL_DIFFICULTIES: ProtocolDifficulty[] = ['easy', 'medium', 'hard'];
 
+export function buildInventoryLocation(locationPreset: string, locationDetail: string) {
+  const preset = locationPreset.trim();
+  const detail = locationDetail.trim();
+
+  if (preset && detail) {
+    return `${preset} / ${detail}`;
+  }
+
+  return preset || detail;
+}
+
 export function createEmptyInventoryDraft(): InventoryItemDraft {
   return {
     name: '',
@@ -150,7 +213,11 @@ export function createEmptyInventoryDraft(): InventoryItemDraft {
     unit: '本',
     minQuantity: 1,
     expiryDate: '',
-    location: '',
+    supplier: 'other',
+    locationPreset: '',
+    locationDetail: '',
+    locationImagePath: '',
+    locationImageUrl: null,
     notes: '',
   };
 }

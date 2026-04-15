@@ -1,63 +1,46 @@
 # Lab Manager Setup
 
-This rebuilt version uses:
+現在の推奨セットアップは `Supabase + 個別ログイン` です。
 
-- `Vite` for the web client
-- `node server/lab-server.js` for the shared backend
-- `server/data/lab-data.json` as the shared data file
+## 1. 依存関係を入れる
 
-## 1. Install Node.js
-
-Install Node.js 20 or later.
-
-## 2. Install dependencies
-
-```bash
+```powershell
 npm install
 ```
 
-## 3. Run in development
+## 2. Supabase 側を初期化する
 
-Terminal 1:
+1. Supabase でプロジェクトを作成
+2. [supabase/schema.sql](./supabase/schema.sql) を実行
+3. 必要なら [supabase/seed.sql](./supabase/seed.sql) を実行
+4. `workspace_members` に研究室メンバーのメールアドレスを追加
 
-```bash
-npm run dev:server
+詳しい操作は [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) にあります。
+
+## 3. 環境変数を設定する
+
+`.env.local` を作って次を入れます。
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Terminal 2:
+## 4. 開発起動する
 
-```bash
+```powershell
 npm run dev
 ```
 
-Open:
+開いたら `http://localhost:5173` へアクセスします。
 
-```text
-http://localhost:5173
+## 5. Android アプリ化する
+
+```powershell
+npm run build:android
+npm run cap:open:android
 ```
 
-## 4. Run for shared lab use
+## Legacy
 
-Build the frontend first:
-
-```bash
-npm run build
-```
-
-Then start the shared server:
-
-```bash
-npm run start
-```
-
-Open from other devices on the same network:
-
-```text
-http://<server-ip>:3000
-```
-
-## Notes
-
-- All users connected to the same server share the same data.
-- Changes are stored in `server/data/lab-data.json`.
-- The client listens for server-side change events and also refreshes on focus.
+`server/lab-server.js` と `server/data/lab-data.json` を使う旧構成もリポジトリ内には残していますが、現在のフロント画面は Supabase 構成を前提にしています。

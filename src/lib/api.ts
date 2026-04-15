@@ -1,140 +1,679 @@
+import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
+import {
+  getPasswordResetRedirectUrl,
+  getSupabaseClient,
+  isSupabaseConfigured,
+} from '@/lib/supabase';
+import { buildInventoryLocation } from '@/lib/types';
 import type {
+  InventoryCategory,
   InventoryItem,
   InventoryItemDraft,
+  InventorySupplier,
   LabSnapshot,
   Order,
   OrderDraft,
+  OrderItem,
+  OrderStatus,
   Protocol,
+  ProtocolDifficulty,
   ProtocolDraft,
+  ProtocolStep,
   SnapshotEvent,
 } from '@/lib/types';
 
-class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
+interface InventoryRow {
+  id: string;
+  name: string;
+  category: InventoryCategory;
+  quantity: number;
+  unit: string;
+  min_quantity: number;
+  expiry_date: string | null;
+  supplier: InventorySupplier;
+  location: string;
+  location_preset?: string | null;
+  location_detail?: string | null;
+  location_image_path?: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
 }
 
-function resolveApiBase() {
-  const explicitBase = import.meta.env.VITE_API_BASE_URL?.trim();
-
-  if (explicitBase) {
-    return explicitBase.replace(/\/$/, '');
-  }
-
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  const origin = window.location.origin;
-
-  if (origin.startsWith('http://') || origin.startsWith('https://')) {
-    return origin.replace(/\/$/, '');
-  }
-
-  return '';
+interface OrderRow {
+  id: string;
+  order_number: string;
+  items: unknown;
+  total_amount: number;
+  status: OrderStatus;
+  notes: string;
+  created_at: string;
+  updated_at: string;
 }
 
-const API_BASE = resolveApiBase();
+interface ProtocolRow {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  steps: unknown;
+  estimated_time: string;
+  difficulty: ProtocolDifficulty;
+  created_at: string;
+  updated_at: string;
+}
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!API_BASE && typeof window !== 'undefined') {
-    const origin = window.location.origin;
+interface AuthCredentials {
+  email: string;
+  password: string;
+}
 
-    if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
-      throw new Error(
-        'No API server is configured for the native app. Set VITE_API_BASE_URL before building Capacitor.',
-      );
-    }
-  }
+interface SignUpResult {
+  session: Session | null;
+  user: User | null;
+  needsEmailConfirmation: boolean;
+  isExistingUser: boolean;
+}
 
-  const headers = new Headers(init.headers);
+const INVENTORY_LOCATION_IMAGE_BUCKET = 'inventory-location-images';
 
-  if (init.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  try {
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers,
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      const contentType = response.headers.get('content-type') ?? '';
-      let message = '共有サーバーへのリクエストに失敗しました。';
-
-      if (contentType.includes('application/json')) {
-        const payload = (await response.json()) as { message?: string };
-        if (payload.message) {
-          message = payload.message;
-        }
-      } else {
-        const text = await response.text();
-        if (text) {
-          message = text;
-        }
-      }
-
-      throw new ApiError(message, response.status);
-    }
-
-    return (await response.json()) as T;
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-
+function getClient() {
+  if (!isSupabaseConfigured) {
     throw new Error(
-      '共有サーバーに接続できません。`npm run start` または `npm run dev:server` を起動してください。',
+      'Supabase の接続情報が未設定です。`.env.local` に VITE_SUPABASE_URL と VITE_SUPABASE_ANON_KEY を設定してください。',
     );
   }
+
+  return getSupabaseClient();
 }
 
-function writeJson<T>(path: string, method: 'POST' | 'PUT', payload: unknown) {
-  return request<T>(path, {
-    method,
-    body: JSON.stringify(payload),
+function createId(prefix: string) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
+  }
+
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getFileExtension(fileName: string) {
+  const parts = fileName.split('.');
+  const extension = parts.at(-1)?.trim().toLowerCase();
+  return extension && extension !== fileName.toLowerCase() ? extension : 'jpg';
+}
+
+function getInventoryLocationImageUrl(path: string) {
+  const client = getClient();
+  const { data } = client.storage.from(INVENTORY_LOCATION_IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (!error || typeof error !== 'object') {
+    return fallback;
+  }
+
+  const message = 'message' in error && typeof error.message === 'string' ? error.message : fallback;
+  const code = 'code' in error && typeof error.code === 'string' ? error.code : '';
+
+  if (message.includes('Invalid login credentials')) {
+    return 'メールアドレスまたはパスワードが正しくありません。';
+  }
+
+  if (message.includes('Email not confirmed')) {
+    return 'メール確認がまだ完了していません。確認メールのリンクを開いてからログインしてください。';
+  }
+
+  if (message.includes('User already registered')) {
+    return 'このメールアドレスは登録されています。ログインするか、パスワード再設定を使ってください。';
+  }
+
+  if (code === '42501' || message.toLowerCase().includes('row-level security')) {
+    return 'このメールアドレスはまだ研究室メンバーとして許可されていません。管理者に `workspace_members` への追加を依頼してください。';
+  }
+
+  if (code === 'PGRST205' || message.includes('Could not find the table')) {
+    return 'Supabase の初期設定が未完了です。`supabase/schema.sql` を実行してください。';
+  }
+
+  if (
+    code === 'PGRST204'
+    || message.includes('location_preset')
+    || message.includes('location_detail')
+    || message.includes('location_image_path')
+  ) {
+    return '保管場所の新しい項目がまだ Supabase に追加されていません。`supabase/add_inventory_location_fields.sql` を実行してください。';
+  }
+
+  if (message.includes('Bucket not found') || message.includes('inventory-location-images')) {
+    return '保管場所の画像保存先がまだ作成されていません。`supabase/add_inventory_location_fields.sql` を実行してください。';
+  }
+
+  return message || fallback;
+}
+
+function isLikelyExistingSignupResult(user: User | null) {
+  if (!user || !('identities' in user) || !Array.isArray(user.identities)) {
+    return false;
+  }
+
+  return user.identities.length === 0;
+}
+
+function normalizeNumber(value: unknown, fallback = 0) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function mapInventoryRow(row: InventoryRow): InventoryItem {
+  const locationPreset = row.location_preset ?? '';
+  const locationDetail =
+    row.location_detail ?? (!locationPreset && row.location ? row.location : '');
+  const location = row.location ?? buildInventoryLocation(locationPreset, locationDetail);
+  const locationImagePath = row.location_image_path ?? '';
+
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    quantity: normalizeNumber(row.quantity),
+    unit: row.unit,
+    minQuantity: normalizeNumber(row.min_quantity),
+    expiryDate: row.expiry_date,
+    supplier: row.supplier ?? 'other',
+    location,
+    locationPreset,
+    locationDetail,
+    locationImagePath,
+    locationImageUrl: locationImagePath ? getInventoryLocationImageUrl(locationImagePath) : null,
+    notes: row.notes ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapOrderItems(items: unknown): OrderItem[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const record = item as Partial<OrderItem>;
+      const quantity = normalizeNumber(record.quantity);
+      const unitPrice = normalizeNumber(record.unitPrice);
+      const totalPrice = normalizeNumber(record.totalPrice, quantity * unitPrice);
+      const itemName = typeof record.itemName === 'string' ? record.itemName : '';
+
+      if (!itemName) {
+        return null;
+      }
+
+      return {
+        id: typeof record.id === 'string' ? record.id : createId(`order_item_${index + 1}`),
+        itemName,
+        quantity,
+        unitPrice,
+        totalPrice,
+      } satisfies OrderItem;
+    })
+    .filter((item): item is OrderItem => item !== null);
+}
+
+function mapOrderRow(row: OrderRow): Order {
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    items: mapOrderItems(row.items),
+    totalAmount: normalizeNumber(row.total_amount),
+    status: row.status,
+    notes: row.notes ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapProtocolSteps(steps: unknown): ProtocolStep[] {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps
+    .map((step, index) => {
+      if (!step || typeof step !== 'object') {
+        return null;
+      }
+
+      const record = step as Partial<ProtocolStep>;
+      const title = typeof record.title === 'string' ? record.title : '';
+      const description = typeof record.description === 'string' ? record.description : '';
+
+      if (!title || !description) {
+        return null;
+      }
+
+      return {
+        id: typeof record.id === 'string' ? record.id : createId(`protocol_step_${index + 1}`),
+        stepNumber: normalizeNumber(record.stepNumber, index + 1),
+        title,
+        description,
+        materials: Array.isArray(record.materials)
+          ? record.materials.filter((material): material is string => typeof material === 'string')
+          : [],
+        duration: typeof record.duration === 'string' ? record.duration : '',
+      } satisfies ProtocolStep;
+    })
+    .filter((step): step is ProtocolStep => step !== null);
+}
+
+function mapProtocolRow(row: ProtocolRow): Protocol {
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    description: row.description ?? '',
+    steps: mapProtocolSteps(row.steps),
+    estimatedTime: row.estimated_time ?? '',
+    difficulty: row.difficulty,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function buildSnapshotUpdatedAt(groups: Array<Array<{ updatedAt: string }>>) {
+  const timestamps = groups.flatMap((items) => items.map((item) => item.updatedAt).filter(Boolean));
+
+  if (timestamps.length === 0) {
+    return null;
+  }
+
+  return timestamps.reduce((latest, current) =>
+    new Date(current).getTime() > new Date(latest).getTime() ? current : latest,
+  );
+}
+
+function prepareInventoryPayload(payload: InventoryItemDraft) {
+  return {
+    name: payload.name.trim(),
+    category: payload.category,
+    quantity: normalizeNumber(payload.quantity),
+    unit: payload.unit.trim(),
+    min_quantity: normalizeNumber(payload.minQuantity),
+    expiry_date: payload.expiryDate.trim() || null,
+    supplier: payload.supplier,
+    location: buildInventoryLocation(payload.locationPreset, payload.locationDetail),
+    location_preset: payload.locationPreset.trim(),
+    location_detail: payload.locationDetail.trim(),
+    location_image_path: payload.locationImagePath.trim(),
+    notes: payload.notes.trim(),
+  };
+}
+
+function prepareOrderItems(payload: OrderDraft) {
+  return payload.items.map((item, index) => {
+    const quantity = normalizeNumber(item.quantity);
+    const unitPrice = normalizeNumber(item.unitPrice);
+
+    return {
+      id: createId(`order_item_${index + 1}`),
+      itemName: item.itemName.trim(),
+      quantity,
+      unitPrice,
+      totalPrice: quantity * unitPrice,
+    } satisfies OrderItem;
   });
 }
 
+function prepareOrderPayload(payload: OrderDraft) {
+  const items = prepareOrderItems(payload);
+
+  return {
+    order_number: payload.orderNumber.trim(),
+    status: payload.status,
+    notes: payload.notes.trim(),
+    items,
+    total_amount: items.reduce((sum, item) => sum + item.totalPrice, 0),
+  };
+}
+
+function prepareProtocolPayload(payload: ProtocolDraft) {
+  const steps = payload.steps.map((step, index) => ({
+    id: createId(`protocol_step_${index + 1}`),
+    stepNumber: index + 1,
+    title: step.title.trim(),
+    description: step.description.trim(),
+    materials: step.materials.map((material) => material.trim()).filter(Boolean),
+    duration: step.duration.trim(),
+  }));
+
+  return {
+    title: payload.title.trim(),
+    category: payload.category.trim(),
+    description: payload.description.trim(),
+    estimated_time: payload.estimatedTime.trim(),
+    difficulty: payload.difficulty,
+    steps,
+  };
+}
+
+export const authAPI = {
+  async getSession() {
+    const client = getClient();
+    const { data, error } = await client.auth.getSession();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'ログイン状態を確認できませんでした。'));
+    }
+
+    return data.session;
+  },
+
+  async signIn(payload: AuthCredentials) {
+    const client = getClient();
+    const { data, error } = await client.auth.signInWithPassword({
+      email: payload.email.trim(),
+      password: payload.password,
+    });
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'ログインできませんでした。'));
+    }
+
+    return data.session;
+  },
+
+  async signUp(payload: AuthCredentials): Promise<SignUpResult> {
+    const client = getClient();
+    const { data, error } = await client.auth.signUp({
+      email: payload.email.trim(),
+      password: payload.password,
+    });
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'アカウントを作成できませんでした。'));
+    }
+
+    const isExistingUser = isLikelyExistingSignupResult(data.user);
+
+    return {
+      session: data.session,
+      user: data.user,
+      needsEmailConfirmation: data.session === null && !isExistingUser,
+      isExistingUser,
+    };
+  },
+
+  async signOut() {
+    const client = getClient();
+    const { error } = await client.auth.signOut();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'ログアウトできませんでした。'));
+    }
+  },
+
+  async requestPasswordReset(email: string) {
+    const client = getClient();
+    const redirectTo = getPasswordResetRedirectUrl();
+    const { error } = await client.auth.resetPasswordForEmail(email.trim(), redirectTo ? { redirectTo } : undefined);
+
+    if (error) {
+      throw new Error(
+        getErrorMessage(error, 'パスワード再設定メールを送信できませんでした。'),
+      );
+    }
+
+    return {
+      redirectTo,
+    };
+  },
+
+  async updatePassword(password: string) {
+    const client = getClient();
+    const { error } = await client.auth.updateUser({ password });
+
+    if (error) {
+      throw new Error(
+        getErrorMessage(error, '新しいパスワードを設定できませんでした。'),
+      );
+    }
+  },
+
+  onAuthStateChange(callback: (event: AuthChangeEvent, session: Session | null) => void) {
+    const client = getClient();
+    return client.auth.onAuthStateChange(callback);
+  },
+};
+
+export const accessAPI = {
+  async hasWorkspaceAccess() {
+    const client = getClient();
+    const { data, error } = await client.from('workspace_members').select('email').limit(1);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '研究室メンバー権限を確認できませんでした。'));
+    }
+
+    return (data ?? []).length > 0;
+  },
+};
+
 export const storageAPI = {
-  getSnapshot: () => request<LabSnapshot>('/api/snapshot'),
-  getInventory: () => request<InventoryItem[]>('/api/inventory'),
-  createInventoryItem: (payload: InventoryItemDraft) => writeJson<InventoryItem>('/api/inventory', 'POST', payload),
-  updateInventoryItem: (id: string, payload: InventoryItemDraft) =>
-    writeJson<InventoryItem>(`/api/inventory/${id}`, 'PUT', payload),
-  deleteInventoryItem: (id: string) => request<{ success: true }>(`/api/inventory/${id}`, { method: 'DELETE' }),
-  getOrders: () => request<Order[]>('/api/orders'),
-  createOrder: (payload: OrderDraft) => writeJson<Order>('/api/orders', 'POST', payload),
-  updateOrder: (id: string, payload: OrderDraft) => writeJson<Order>(`/api/orders/${id}`, 'PUT', payload),
-  deleteOrder: (id: string) => request<{ success: true }>(`/api/orders/${id}`, { method: 'DELETE' }),
-  getProtocols: () => request<Protocol[]>('/api/protocols'),
-  createProtocol: (payload: ProtocolDraft) => writeJson<Protocol>('/api/protocols', 'POST', payload),
-  updateProtocol: (id: string, payload: ProtocolDraft) =>
-    writeJson<Protocol>(`/api/protocols/${id}`, 'PUT', payload),
-  deleteProtocol: (id: string) => request<{ success: true }>(`/api/protocols/${id}`, { method: 'DELETE' }),
-  subscribeToChanges: (onMessage: (event: SnapshotEvent) => void) => {
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+  getInventoryLocationImageUrl,
+
+  async uploadInventoryLocationImage(file: File, itemId?: string | null) {
+    const client = getClient();
+    const extension = getFileExtension(file.name);
+    const safeItemId = itemId?.trim() || createId('inventory_location');
+    const filePath = `${safeItemId}/${createId('image')}.${extension}`;
+    const { error } = await client.storage.from(INVENTORY_LOCATION_IMAGE_BUCKET).upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '保管場所の画像をアップロードできませんでした。'));
+    }
+
+    return {
+      path: filePath,
+      publicUrl: getInventoryLocationImageUrl(filePath),
+    };
+  },
+
+  async deleteInventoryLocationImage(path: string) {
+    if (!path.trim()) {
+      return;
+    }
+
+    const client = getClient();
+    const { error } = await client.storage.from(INVENTORY_LOCATION_IMAGE_BUCKET).remove([path]);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '保管場所の画像を削除できませんでした。'));
+    }
+  },
+
+  async getSnapshot(): Promise<LabSnapshot> {
+    const client = getClient();
+
+    const [inventoryResponse, ordersResponse, protocolsResponse] = await Promise.all([
+      client.from('inventory_items').select('*').order('updated_at', { ascending: false }),
+      client.from('orders').select('*').order('updated_at', { ascending: false }),
+      client.from('protocols').select('*').order('updated_at', { ascending: false }),
+    ]);
+
+    if (inventoryResponse.error) {
+      throw new Error(getErrorMessage(inventoryResponse.error, '在庫を読み込めませんでした。'));
+    }
+
+    if (ordersResponse.error) {
+      throw new Error(getErrorMessage(ordersResponse.error, '発注を読み込めませんでした。'));
+    }
+
+    if (protocolsResponse.error) {
+      throw new Error(getErrorMessage(protocolsResponse.error, 'プロトコルを読み込めませんでした。'));
+    }
+
+    const inventory = (inventoryResponse.data ?? []).map((row) => mapInventoryRow(row as InventoryRow));
+    const orders = (ordersResponse.data ?? []).map((row) => mapOrderRow(row as OrderRow));
+    const protocols = (protocolsResponse.data ?? []).map((row) => mapProtocolRow(row as ProtocolRow));
+
+    return {
+      inventory,
+      orders,
+      protocols,
+      updatedAt: buildSnapshotUpdatedAt([inventory, orders, protocols]),
+    };
+  },
+
+  async createInventoryItem(payload: InventoryItemDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('inventory_items')
+      .insert(prepareInventoryPayload(payload))
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '試薬を追加できませんでした。'));
+    }
+
+    return mapInventoryRow(data as InventoryRow);
+  },
+
+  async updateInventoryItem(id: string, payload: InventoryItemDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('inventory_items')
+      .update(prepareInventoryPayload(payload))
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '試薬を更新できませんでした。'));
+    }
+
+    return mapInventoryRow(data as InventoryRow);
+  },
+
+  async deleteInventoryItem(id: string) {
+    const client = getClient();
+    const { error } = await client.from('inventory_items').delete().eq('id', id);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '試薬を削除できませんでした。'));
+    }
+
+    return { success: true as const };
+  },
+
+  async createOrder(payload: OrderDraft) {
+    const client = getClient();
+    const { data, error } = await client.from('orders').insert(prepareOrderPayload(payload)).select('*').single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '発注を作成できませんでした。'));
+    }
+
+    return mapOrderRow(data as OrderRow);
+  },
+
+  async updateOrder(id: string, payload: OrderDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('orders')
+      .update(prepareOrderPayload(payload))
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '発注を更新できませんでした。'));
+    }
+
+    return mapOrderRow(data as OrderRow);
+  },
+
+  async deleteOrder(id: string) {
+    const client = getClient();
+    const { error } = await client.from('orders').delete().eq('id', id);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, '発注を削除できませんでした。'));
+    }
+
+    return { success: true as const };
+  },
+
+  async createProtocol(payload: ProtocolDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('protocols')
+      .insert(prepareProtocolPayload(payload))
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'プロトコルを追加できませんでした。'));
+    }
+
+    return mapProtocolRow(data as ProtocolRow);
+  },
+
+  async updateProtocol(id: string, payload: ProtocolDraft) {
+    const client = getClient();
+    const { data, error } = await client
+      .from('protocols')
+      .update(prepareProtocolPayload(payload))
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'プロトコルを更新できませんでした。'));
+    }
+
+    return mapProtocolRow(data as ProtocolRow);
+  },
+
+  async deleteProtocol(id: string) {
+    const client = getClient();
+    const { error } = await client.from('protocols').delete().eq('id', id);
+
+    if (error) {
+      throw new Error(getErrorMessage(error, 'プロトコルを削除できませんでした。'));
+    }
+
+    return { success: true as const };
+  },
+
+  subscribeToChanges(onMessage: (event: SnapshotEvent) => void) {
+    if (typeof window === 'undefined' || !isSupabaseConfigured) {
       return () => undefined;
     }
 
-    const source = new window.EventSource(`${API_BASE}/api/events`);
-    source.onmessage = (event) => {
-      try {
-        onMessage(JSON.parse(event.data) as SnapshotEvent);
-      } catch {
-        return;
-      }
-    };
+    const client = getClient();
+    const channel = client.channel(`lab-realtime-${createId('channel')}`);
+    const emitSnapshotUpdate = () =>
+      onMessage({
+        type: 'snapshot-updated',
+        updatedAt: new Date().toISOString(),
+      });
+
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items' }, emitSnapshotUpdate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, emitSnapshotUpdate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'protocols' }, emitSnapshotUpdate)
+      .subscribe();
 
     return () => {
-      source.close();
+      void client.removeChannel(channel);
     };
   },
 };

@@ -280,13 +280,13 @@ export default function OrdersManagerPage({
         title={editingOrder ? '発注を編集' : '発注を作成'}
         description="発注は一元保存され、研究室全体で購入の進捗を確認できます。"
         footer={
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-slate-500">下書き合計: {formatCurrency(draftTotal)}</div>
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 sm:w-auto"
               >
                 キャンセル
               </button>
@@ -294,7 +294,7 @@ export default function OrdersManagerPage({
                 type="button"
                 onClick={() => void submitForm()}
                 disabled={saving}
-                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {saving ? '保存中...' : editingOrder ? '変更を保存' : '作成する'}
               </button>

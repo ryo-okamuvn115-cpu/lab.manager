@@ -1,12 +1,16 @@
-import { useDeferredValue, useMemo, useState } from 'react';
-import { Edit3, Plus, Search, Trash2 } from 'lucide-react';
+import { useDeferredValue, useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { ChevronDown, ChevronUp, Edit3, ImagePlus, Plus, Search, Trash2 } from 'lucide-react';
 import ErrorBanner from '@/components/ErrorBanner';
 import FormField from '@/components/FormField';
 import Modal from '@/components/Modal';
+import { storageAPI } from '@/lib/api';
 import { formatDate, formatDateTime, formatRelativeDays } from '@/lib/format';
 import {
   INVENTORY_CATEGORY_LABELS,
   INVENTORY_FILTERS,
+  INVENTORY_LOCATION_PRESETS,
+  INVENTORY_SUPPLIER_LABELS,
+  INVENTORY_SUPPLIERS,
   createEmptyInventoryDraft,
   type InventoryCategory,
   type InventoryItem,
@@ -27,6 +31,9 @@ interface InventoryManagerPageProps {
 const inputClassName =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100';
 
+const MAX_LOCATION_IMAGE_SIZE = 10 * 1024 * 1024;
+const LOCATION_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,.heic,.heif';
+
 function toDraft(item: InventoryItem): InventoryItemDraft {
   return {
     name: item.name,
@@ -35,9 +42,17 @@ function toDraft(item: InventoryItem): InventoryItemDraft {
     unit: item.unit,
     minQuantity: item.minQuantity,
     expiryDate: item.expiryDate ?? '',
-    location: item.location,
+    supplier: item.supplier,
+    locationPreset: item.locationPreset,
+    locationDetail: item.locationDetail,
+    locationImagePath: item.locationImagePath,
+    locationImageUrl: item.locationImageUrl,
     notes: item.notes,
   };
+}
+
+function shouldPreviewImage(path: string, mimeType = '') {
+  return !/\.hei[cf]$/i.test(path) && !/heic|heif/i.test(mimeType);
 }
 
 export default function InventoryManagerPage({
@@ -55,8 +70,26 @@ export default function InventoryManagerPage({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState<InventoryItemDraft>(createEmptyInventoryDraft());
+  const [isLocationDetailsOpen, setIsLocationDetailsOpen] = useState(false);
+  const [selectedLocationImage, setSelectedLocationImage] = useState<File | null>(null);
+  const [selectedLocationImagePreview, setSelectedLocationImagePreview] = useState<string | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
 
   const deferredSearch = useDeferredValue(search);
+
+  useEffect(() => {
+    if (!selectedLocationImage) {
+      setSelectedLocationImagePreview(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(selectedLocationImage);
+    setSelectedLocationImagePreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [selectedLocationImage]);
 
   const filteredItems = useMemo(() => {
     const keyword = deferredSearch.trim().toLowerCase();
@@ -68,7 +101,7 @@ export default function InventoryManagerPage({
           return true;
         }
 
-        return [item.name, item.location, item.notes]
+        return [item.name, INVENTORY_SUPPLIER_LABELS[item.supplier], item.location, item.notes]
           .join(' ')
           .toLowerCase()
           .includes(keyword);
@@ -79,12 +112,18 @@ export default function InventoryManagerPage({
   const openCreateModal = () => {
     setEditingItem(null);
     setForm(createEmptyInventoryDraft());
+    setSelectedLocationImage(null);
+    setIsLocationDetailsOpen(false);
+    setFileInputKey((current) => current + 1);
     setIsModalOpen(true);
   };
 
   const openEditModal = (item: InventoryItem) => {
     setEditingItem(item);
     setForm(toDraft(item));
+    setSelectedLocationImage(null);
+    setIsLocationDetailsOpen(Boolean(item.locationDetail || item.locationImagePath));
+    setFileInputKey((current) => current + 1);
     setIsModalOpen(true);
   };
 
@@ -96,10 +135,39 @@ export default function InventoryManagerPage({
     setIsModalOpen(false);
     setEditingItem(null);
     setForm(createEmptyInventoryDraft());
+    setSelectedLocationImage(null);
+    setSelectedLocationImagePreview(null);
+    setIsLocationDetailsOpen(false);
+    setFileInputKey((current) => current + 1);
   };
 
   const updateField = <K extends keyof InventoryItemDraft,>(field: K, value: InventoryItemDraft[K]) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleLocationImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) {
+      setSelectedLocationImage(null);
+      return;
+    }
+
+    if (file.size > MAX_LOCATION_IMAGE_SIZE) {
+      window.alert('保管場所の画像は 10MB 以下にしてください。');
+      setFileInputKey((current) => current + 1);
+      return;
+    }
+
+    setSelectedLocationImage(file);
+    setIsLocationDetailsOpen(true);
+  };
+
+  const clearLocationImage = () => {
+    setSelectedLocationImage(null);
+    updateField('locationImagePath', '');
+    updateField('locationImageUrl', null);
+    setFileInputKey((current) => current + 1);
   };
 
   const submitForm = async () => {
@@ -118,24 +186,50 @@ export default function InventoryManagerPage({
       return;
     }
 
-    const payload: InventoryItemDraft = {
-      ...form,
-      name: form.name.trim(),
-      unit: form.unit.trim(),
-      location: form.location.trim(),
-      notes: form.notes.trim(),
-      expiryDate: form.expiryDate.trim(),
-    };
+    let uploadedLocationImagePath = '';
+    let nextLocationImagePath = form.locationImagePath.trim();
+    let nextLocationImageUrl = form.locationImageUrl;
 
     try {
+      if (selectedLocationImage) {
+        const uploadedImage = await storageAPI.uploadInventoryLocationImage(
+          selectedLocationImage,
+          editingItem?.id ?? null,
+        );
+        uploadedLocationImagePath = uploadedImage.path;
+        nextLocationImagePath = uploadedImage.path;
+        nextLocationImageUrl = uploadedImage.publicUrl;
+      }
+
+      const payload: InventoryItemDraft = {
+        ...form,
+        name: form.name.trim(),
+        unit: form.unit.trim(),
+        expiryDate: form.expiryDate.trim(),
+        locationPreset: form.locationPreset.trim(),
+        locationDetail: form.locationDetail.trim(),
+        locationImagePath: nextLocationImagePath,
+        locationImageUrl: nextLocationImageUrl,
+        notes: form.notes.trim(),
+      };
+
       if (editingItem) {
         await onUpdate(editingItem.id, payload);
       } else {
         await onCreate(payload);
       }
 
+      const previousLocationImagePath = editingItem?.locationImagePath ?? '';
+      if (previousLocationImagePath && previousLocationImagePath !== nextLocationImagePath) {
+        void storageAPI.deleteInventoryLocationImage(previousLocationImagePath).catch(() => undefined);
+      }
+
       closeModal();
     } catch (error) {
+      if (uploadedLocationImagePath) {
+        void storageAPI.deleteInventoryLocationImage(uploadedLocationImagePath).catch(() => undefined);
+      }
+
       window.alert(error instanceof Error ? error.message : '試薬を保存できませんでした。');
     }
   };
@@ -149,10 +243,20 @@ export default function InventoryManagerPage({
 
     try {
       await onDelete(item.id);
+      if (item.locationImagePath) {
+        void storageAPI.deleteInventoryLocationImage(item.locationImagePath).catch(() => undefined);
+      }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '試薬を削除できませんでした。');
     }
   };
+
+  const selectedLocationImageLabel = selectedLocationImage?.name
+    ?? (form.locationImagePath ? '登録済みの画像があります' : '選択されていません');
+  const locationImagePreviewSource = selectedLocationImagePreview ?? form.locationImageUrl;
+  const locationImagePreviewPath = selectedLocationImage?.name || form.locationImagePath;
+  const canPreviewLocationImage = Boolean(locationImagePreviewSource)
+    && shouldPreviewImage(locationImagePreviewPath, selectedLocationImage?.type ?? '');
 
   return (
     <div className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
@@ -203,16 +307,16 @@ export default function InventoryManagerPage({
 
       <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200">
         <div className="overflow-x-auto">
-          <table className="min-w-full">
+          <table className="min-w-full table-fixed md:table-auto">
             <thead className="bg-slate-50">
               <tr className="text-left text-xs uppercase tracking-[0.16em] text-slate-500">
-                <th className="px-6 py-4">試薬</th>
-                <th className="px-6 py-4">カテゴリ</th>
-                <th className="px-6 py-4">在庫数</th>
-                <th className="px-6 py-4">使用期限</th>
-                <th className="px-6 py-4">保管場所</th>
-                <th className="px-6 py-4">更新日時</th>
-                <th className="px-6 py-4 text-right">操作</th>
+                <th className="w-[34%] px-4 py-4 sm:px-6">試薬</th>
+                <th className="hidden px-4 py-4 md:table-cell md:w-[14%] md:px-6">カテゴリ</th>
+                <th className="w-[22%] px-4 py-4 sm:px-6 md:w-[16%]">在庫数</th>
+                <th className="w-[24%] px-4 py-4 sm:px-6 md:w-[16%]">使用期限</th>
+                <th className="hidden px-4 py-4 lg:table-cell lg:w-[14%] lg:px-6">保管場所</th>
+                <th className="hidden px-4 py-4 xl:table-cell xl:w-[16%] xl:px-6">更新日時</th>
+                <th className="hidden px-4 py-4 text-right md:table-cell md:w-[12%] md:px-6">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -228,30 +332,85 @@ export default function InventoryManagerPage({
 
                   return (
                     <tr key={item.id} className="align-top text-slate-700">
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">{item.name}</div>
+                      <td className="px-4 py-4 sm:px-6">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="break-words font-medium text-slate-900">{item.name}</div>
+                            <div className="mt-2 md:hidden">
+                              <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                                {INVENTORY_CATEGORY_LABELS[item.category]}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 gap-2 md:hidden">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              aria-label={`${item.name} を編集`}
+                              title="編集"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <Edit3 size={15} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(item)}
+                              aria-label={`${item.name} を削除`}
+                              title="削除"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 text-rose-600 transition hover:bg-rose-50"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-slate-500">発注元: {INVENTORY_SUPPLIER_LABELS[item.supplier]}</div>
+                        <div className="mt-1 text-xs text-slate-500 lg:hidden">
+                          保管場所: {item.location || '未設定'}
+                        </div>
+                        {item.locationImageUrl && (
+                          <a
+                            href={item.locationImageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-flex text-xs font-medium text-blue-600 transition hover:text-blue-700 lg:hidden"
+                          >
+                            保管場所写真を開く
+                          </a>
+                        )}
                         <div className="mt-1 text-xs text-slate-500">{item.notes || 'メモなし'}</div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                      <td className="hidden px-4 py-4 md:table-cell md:px-6">
+                        <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                           {INVENTORY_CATEGORY_LABELS[item.category]}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">
+                      <td className="px-4 py-4 sm:px-6">
+                        <div className="break-words font-medium text-slate-900">
                           {item.quantity} {item.unit}
                         </div>
                         <div className={`mt-1 text-xs ${lowStock ? 'text-amber-600' : 'text-slate-500'}`}>
                           最低 {item.minQuantity} {item.unit}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div>{formatDate(item.expiryDate)}</div>
+                      <td className="px-4 py-4 sm:px-6">
+                        <div className="break-words">{formatDate(item.expiryDate)}</div>
                         <div className="mt-1 text-xs text-slate-500">{formatRelativeDays(item.expiryDate)}</div>
                       </td>
-                      <td className="px-6 py-4">{item.location || '-'}</td>
-                      <td className="px-6 py-4 text-slate-500">{formatDateTime(item.updatedAt)}</td>
-                      <td className="px-6 py-4">
+                      <td className="hidden px-4 py-4 lg:table-cell lg:px-6">
+                        <div className="break-words">{item.location || '-'}</div>
+                        {item.locationImageUrl && (
+                          <a
+                            href={item.locationImageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-1 inline-flex text-xs font-medium text-blue-600 transition hover:text-blue-700"
+                          >
+                            保管場所写真を開く
+                          </a>
+                        )}
+                      </td>
+                      <td className="hidden px-4 py-4 text-slate-500 xl:table-cell xl:px-6">{formatDateTime(item.updatedAt)}</td>
+                      <td className="hidden px-4 py-4 md:table-cell md:px-6">
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
@@ -290,15 +449,15 @@ export default function InventoryManagerPage({
         title={editingItem ? '試薬を編集' : '試薬を追加'}
         description="変更内容は共有サーバーに保存され、全員に同期されます。"
         footer={
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-slate-500">
               在庫アラートは現在数量と最低在庫数をもとに表示されます。
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 sm:w-auto"
               >
                 キャンセル
               </button>
@@ -306,7 +465,7 @@ export default function InventoryManagerPage({
                 type="button"
                 onClick={() => void submitForm()}
                 disabled={saving}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {saving ? '保存中...' : editingItem ? '変更を保存' : '追加する'}
               </button>
@@ -373,16 +532,114 @@ export default function InventoryManagerPage({
               className={inputClassName}
             />
           </FormField>
+
+          <FormField label="発注元">
+            <select
+              value={form.supplier}
+              onChange={(event) => updateField('supplier', event.target.value as InventoryItemDraft['supplier'])}
+              className={inputClassName}
+            >
+              {INVENTORY_SUPPLIERS.map((supplier) => (
+                <option key={supplier} value={supplier}>
+                  {INVENTORY_SUPPLIER_LABELS[supplier]}
+                </option>
+              ))}
+            </select>
+          </FormField>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4">
-          <FormField label="保管場所">
-            <input
-              value={form.location}
-              onChange={(event) => updateField('location', event.target.value)}
-              className={inputClassName}
-            />
-          </FormField>
+        <div className="mt-6 space-y-4">
+          <div className="rounded-3xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField label="保管場所" hint="候補にない場所は詳細欄に補足を書けます。">
+                <select
+                  value={form.locationPreset}
+                  onChange={(event) => updateField('locationPreset', event.target.value)}
+                  className={inputClassName}
+                >
+                  <option value="">保管場所を選択</option>
+                  {INVENTORY_LOCATION_PRESETS.map((locationPreset) => (
+                    <option key={locationPreset} value={locationPreset}>
+                      {locationPreset}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setIsLocationDetailsOpen((current) => !current)}
+                className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-50"
+              >
+                <div>
+                  <div className="text-base font-semibold text-slate-900">保管場所詳細情報</div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    候補にない場所や箱内位置、写真を必要なときだけ追加できます。
+                  </p>
+                </div>
+                {isLocationDetailsOpen ? (
+                  <ChevronUp className="shrink-0 text-slate-500" size={20} />
+                ) : (
+                  <ChevronDown className="shrink-0 text-slate-500" size={20} />
+                )}
+              </button>
+
+              {isLocationDetailsOpen && (
+                <div className="border-t border-slate-200 px-4 py-4">
+                  <div className="grid grid-cols-1 gap-4">
+                    <FormField label="補足 / 箱内位置" hint="例: 左上、手前 / 青いケース">
+                      <input
+                        value={form.locationDetail}
+                        onChange={(event) => updateField('locationDetail', event.target.value)}
+                        className={inputClassName}
+                      />
+                    </FormField>
+
+                    <FormField label="保管場所写真" hint="JPEG, PNG, WEBP, HEIC (最大10MB)">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100">
+                            <ImagePlus size={16} />
+                            ファイルを選択
+                            <input
+                              key={fileInputKey}
+                              type="file"
+                              accept={LOCATION_IMAGE_ACCEPT}
+                              onChange={handleLocationImageChange}
+                              className="sr-only"
+                            />
+                          </label>
+                          <div className="text-sm text-slate-500">{selectedLocationImageLabel}</div>
+                        </div>
+
+                        {(form.locationImagePath || selectedLocationImage) && (
+                          <button
+                            type="button"
+                            onClick={clearLocationImage}
+                            className="mt-3 inline-flex rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-white"
+                          >
+                            画像を外す
+                          </button>
+                        )}
+
+                        {canPreviewLocationImage && locationImagePreviewSource && (
+                          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                            <img
+                              src={locationImagePreviewSource}
+                              alt="保管場所プレビュー"
+                              className="h-44 w-full object-cover"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </FormField>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           <FormField label="メモ">
             <textarea

@@ -11,14 +11,27 @@ function toError(error: unknown) {
   return error instanceof Error ? error : new Error('不明なエラーが発生しました。');
 }
 
-export function useLabManager() {
+export function useLabManager(enabled: boolean) {
   const [snapshot, setSnapshot] = useState<LabSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const hasLoadedRef = useRef(false);
 
+  const resetState = useCallback(() => {
+    hasLoadedRef.current = false;
+    setSnapshot(null);
+    setLoading(false);
+    setSaving(false);
+    setError(null);
+  }, []);
+
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      resetState();
+      return;
+    }
+
     if (!hasLoadedRef.current) {
       setLoading(true);
     }
@@ -33,9 +46,14 @@ export function useLabManager() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled, resetState]);
 
   useEffect(() => {
+    if (!enabled) {
+      resetState();
+      return;
+    }
+
     void refresh();
 
     const intervalId = window.setInterval(() => {
@@ -57,7 +75,7 @@ export function useLabManager() {
       unsubscribe();
       window.removeEventListener('focus', handleFocus);
     };
-  }, [refresh]);
+  }, [enabled, refresh, resetState]);
 
   const runMutation = useCallback(
     async <T,>(callback: () => Promise<T>) => {

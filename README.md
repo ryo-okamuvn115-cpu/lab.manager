@@ -1,47 +1,49 @@
 # Lab Manager
 
 研究室向けの試薬・発注書・プロトコル管理アプリです。  
-今回の更新で `localStorage` 保存をやめて、共有サーバー上のJSONをAPI経由で読む構成に変更しています。
+現在の推奨構成は `Supabase + 個別ログイン` です。
 
-## セットアップ
+## クイックスタート
 
-```bash
-npm install
+1. `npm install`
+2. Supabase でプロジェクト作成
+3. [supabase/schema.sql](./supabase/schema.sql) を SQL Editor で実行
+4. 必要なら [supabase/seed.sql](./supabase/seed.sql) を実行
+5. `.env.local` に URL と anon key を設定
+6. `npm run dev`
+
+詳細は [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) を見ればそのまま進められます。
+
+## 環境変数
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-## 開発時
+## 開発起動
 
-ターミナルを2つ使います。
-
-1つ目
-
-```bash
-npm run dev:server
-```
-
-2つ目
-
-```bash
+```powershell
 npm run dev
 ```
 
-ブラウザから `http://localhost:5173` を開くと、Vite経由でAPIに接続します。
+ブラウザで `http://localhost:5173` を開きます。
 
-## 共有利用
+## 研究室メンバーの管理
 
-共有PCまたは研究室内サーバーで次を実行します。
+ログイン後でも、`workspace_members` テーブルにメールアドレスが入っていないと共有データへアクセスできません。  
+研究室メンバーの追加は Supabase の SQL Editor または Table Editor で行います。
 
-```bash
-npm run build
-npm run start
+## Android アプリ化
+
+```powershell
+npm run build:android
+npm run cap:open:android
 ```
 
-その後、他の端末から `http://<サーバーのIPアドレス>:3000` にアクセスすると、同じデータを参照できます。
+手順の詳細は [MOBILE_DEPLOY.md](./MOBILE_DEPLOY.md) にまとめています。
 
-## データ保存先
+## 補足
 
-共有データは次のファイルに保存されます。
-
-`server/data/lab-data.json`
-
-このファイルをバックアップすれば、在庫・発注書・プロトコルをまとめて保全できます。
+- `server/` 配下の JSON サーバー構成は残していますが、現在のフロントは Supabase 構成を前提にしています。
+- 共有同期は Supabase Database と Realtime を使います。

@@ -356,13 +356,13 @@ export default function ProtocolsManagerPage({
         title={editingProtocol ? 'プロトコルを編集' : 'プロトコルを追加'}
         description="更新内容は研究室のメンバー全員にすぐ共有されます。"
         footer={
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-slate-500">材料はカンマ区切りまたは改行区切りで入力してください。</div>
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 sm:w-auto"
               >
                 キャンセル
               </button>
@@ -370,7 +370,7 @@ export default function ProtocolsManagerPage({
                 type="button"
                 onClick={() => void submitForm()}
                 disabled={saving}
-                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {saving ? '保存中...' : editingProtocol ? '変更を保存' : '追加する'}
               </button>
