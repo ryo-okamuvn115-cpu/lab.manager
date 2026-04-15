@@ -318,8 +318,7 @@ function App() {
             error={error}
             lastSyncAt={snapshot?.updatedAt ?? null}
             locationOptions={(snapshot?.storageLocations ?? [])
-              .filter((location) => location.isActive)
-              .map((location) => location.name)}
+              .filter((location) => location.isActive)}
             onCreate={createInventoryItem}
             onUpdate={updateInventoryItem}
             onDelete={deleteInventoryItem}

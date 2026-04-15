@@ -15,6 +15,7 @@ import {
   type InventoryCategory,
   type InventoryItem,
   type InventoryItemDraft,
+  type StorageLocation,
 } from '@/lib/types';
 
 interface InventoryManagerPageProps {
@@ -23,7 +24,7 @@ interface InventoryManagerPageProps {
   saving: boolean;
   error: Error | null;
   lastSyncAt: string | null;
-  locationOptions?: string[];
+  locationOptions?: StorageLocation[];
   onCreate: (payload: InventoryItemDraft) => Promise<unknown>;
   onUpdate: (id: string, payload: InventoryItemDraft) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
@@ -79,7 +80,7 @@ export default function InventoryManagerPage({
 
   const deferredSearch = useDeferredValue(search);
   const availableLocationPresets = useMemo(() => {
-    const source = locationOptions.length > 0 ? locationOptions : [...INVENTORY_LOCATION_PRESETS];
+    const source = locationOptions.length > 0 ? locationOptions.map((location) => location.name) : [...INVENTORY_LOCATION_PRESETS];
     const values = new Set(source.map((location) => location.trim()).filter(Boolean));
     const currentLocation = form.locationPreset.trim();
 
@@ -89,6 +90,14 @@ export default function InventoryManagerPage({
 
     return Array.from(values);
   }, [form.locationPreset, locationOptions]);
+  const selectedStorageLocation = useMemo(
+    () => locationOptions.find((location) => location.name.trim() === form.locationPreset.trim()) ?? null,
+    [form.locationPreset, locationOptions],
+  );
+  const selectedLocationDetailOptions = selectedStorageLocation?.detailOptions ?? [];
+  const selectedLocationDetailValue = selectedLocationDetailOptions.includes(form.locationDetail.trim())
+    ? form.locationDetail.trim()
+    : '';
 
   useEffect(() => {
     if (!selectedLocationImage) {
@@ -156,6 +165,26 @@ export default function InventoryManagerPage({
 
   const updateField = <K extends keyof InventoryItemDraft,>(field: K, value: InventoryItemDraft[K]) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleLocationPresetChange = (value: string) => {
+    setForm((current) => {
+      const previousLocation = locationOptions.find(
+        (location) => location.name.trim() === current.locationPreset.trim(),
+      );
+      const wasPresetDetail = previousLocation?.detailOptions.includes(current.locationDetail.trim()) ?? false;
+
+      return {
+        ...current,
+        locationPreset: value,
+        locationDetail: wasPresetDetail ? '' : current.locationDetail,
+      };
+    });
+
+    const nextLocation = locationOptions.find((location) => location.name.trim() === value.trim());
+    if (nextLocation && nextLocation.detailOptions.length > 0) {
+      setIsLocationDetailsOpen(true);
+    }
   };
 
   const handleLocationImageChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -567,7 +596,7 @@ export default function InventoryManagerPage({
               <FormField label="保管場所" hint="候補にない場所は詳細欄に補足を書けます。">
                 <select
                   value={form.locationPreset}
-                  onChange={(event) => updateField('locationPreset', event.target.value)}
+                  onChange={(event) => handleLocationPresetChange(event.target.value)}
                   className={inputClassName}
                 >
                   <option value="">保管場所を選択</option>
@@ -602,7 +631,31 @@ export default function InventoryManagerPage({
               {isLocationDetailsOpen && (
                 <div className="border-t border-slate-200 px-4 py-4">
                   <div className="grid grid-cols-1 gap-4">
-                    <FormField label="補足 / 箱内位置" hint="例: 左上、手前 / 青いケース">
+                    {selectedLocationDetailOptions.length > 0 && (
+                      <FormField label="庫内位置" hint="管理画面で登録された候補です。">
+                        <select
+                          value={selectedLocationDetailValue}
+                          onChange={(event) => updateField('locationDetail', event.target.value)}
+                          className={inputClassName}
+                        >
+                          <option value="">庫内位置を選択</option>
+                          {selectedLocationDetailOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+                    )}
+
+                    <FormField
+                      label={selectedLocationDetailOptions.length > 0 ? '補足 / 自由記述' : '補足 / 箱内位置'}
+                      hint={
+                        selectedLocationDetailOptions.length > 0
+                          ? '候補にない位置や箱の中の場所はここに直接書けます。'
+                          : '例: 左上、手前 / 青いケース'
+                      }
+                    >
                       <input
                         value={form.locationDetail}
                         onChange={(event) => updateField('locationDetail', event.target.value)}

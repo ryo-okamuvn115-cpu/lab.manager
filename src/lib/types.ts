@@ -70,6 +70,7 @@ export interface StorageLocation {
   id: string;
   name: string;
   details: string;
+  detailOptions: string[];
   sortOrder: number;
   isActive: boolean;
   createdAt: string;
@@ -79,6 +80,7 @@ export interface StorageLocation {
 export interface StorageLocationDraft {
   name: string;
   details: string;
+  detailOptions: string[];
   sortOrder: number;
   isActive: boolean;
 }
@@ -265,6 +267,7 @@ export function createEmptyStorageLocationDraft(): StorageLocationDraft {
   return {
     name: '',
     details: '',
+    detailOptions: [],
     sortOrder: 0,
     isActive: true,
   };

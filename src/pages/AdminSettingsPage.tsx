@@ -26,10 +26,26 @@ interface AdminSettingsPageProps {
 const inputClassName =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100';
 
+function parseDetailOptionsText(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/\r?\n/)
+        .map((option) => option.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function formatDetailOptionsText(options: string[]) {
+  return options.join('\n');
+}
+
 function toDraft(location: StorageLocation): StorageLocationDraft {
   return {
     name: location.name,
     details: location.details,
+    detailOptions: location.detailOptions,
     sortOrder: location.sortOrder,
     isActive: location.isActive,
   };
@@ -49,6 +65,7 @@ export default function AdminSettingsPage({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState<StorageLocation | null>(null);
   const [form, setForm] = useState<StorageLocationDraft>(createEmptyStorageLocationDraft());
+  const [detailOptionsText, setDetailOptionsText] = useState('');
 
   const usageByLocation = useMemo(() => {
     const counts = new Map<string, number>();
@@ -81,12 +98,14 @@ export default function AdminSettingsPage({
       ...createEmptyStorageLocationDraft(),
       sortOrder: nextSortOrder,
     });
+    setDetailOptionsText('');
     setIsModalOpen(true);
   };
 
   const openEditModal = (location: StorageLocation) => {
     setEditingLocation(location);
     setForm(toDraft(location));
+    setDetailOptionsText(formatDetailOptionsText(location.detailOptions));
     setIsModalOpen(true);
   };
 
@@ -98,6 +117,7 @@ export default function AdminSettingsPage({
     setIsModalOpen(false);
     setEditingLocation(null);
     setForm(createEmptyStorageLocationDraft());
+    setDetailOptionsText('');
   };
 
   const updateField = <K extends keyof StorageLocationDraft,>(
@@ -116,6 +136,7 @@ export default function AdminSettingsPage({
     const payload: StorageLocationDraft = {
       name: form.name.trim(),
       details: form.details.trim(),
+      detailOptions: parseDetailOptionsText(detailOptionsText),
       sortOrder: Number.isFinite(Number(form.sortOrder)) ? Number(form.sortOrder) : 0,
       isActive: form.isActive,
     };
@@ -216,8 +237,23 @@ export default function AdminSettingsPage({
                     {location.details && (
                       <p className="mt-2 break-words text-sm leading-6 text-slate-500">{location.details}</p>
                     )}
+                    {location.detailOptions.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {location.detailOptions.slice(0, 6).map((option) => (
+                          <span key={option} className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+                            {option}
+                          </span>
+                        ))}
+                        {location.detailOptions.length > 6 && (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
+                            +{location.detailOptions.length - 6}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
                       <span className="rounded-full bg-slate-50 px-2.5 py-1">表示順: {location.sortOrder}</span>
+                      <span className="rounded-full bg-slate-50 px-2.5 py-1">庫内候補: {location.detailOptions.length} 件</span>
                       <span className="rounded-full bg-slate-50 px-2.5 py-1">利用中の在庫: {usageCount} 件</span>
                       <span className="rounded-full bg-slate-50 px-2.5 py-1">更新: {formatDateTime(location.updatedAt)}</span>
                     </div>
@@ -303,6 +339,18 @@ export default function AdminSettingsPage({
                 value={form.details}
                 onChange={(event) => updateField('details', event.target.value)}
                 placeholder="例: 培養室入口右側、青いラベルの棚"
+                className={inputClassName}
+              />
+            </FormField>
+          </div>
+
+          <div className="md:col-span-2">
+            <FormField label="庫内位置候補" hint="1行に1候補で入力します。例: 1段目 左、1段目 右、2段目 左">
+              <textarea
+                rows={6}
+                value={detailOptionsText}
+                onChange={(event) => setDetailOptionsText(event.target.value)}
+                placeholder={'1段目 左\n1段目 右\n2段目 左\n2段目 右'}
                 className={inputClassName}
               />
             </FormField>

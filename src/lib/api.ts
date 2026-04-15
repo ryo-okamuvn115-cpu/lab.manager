@@ -71,6 +71,7 @@ interface StorageLocationRow {
   id: string;
   name: string;
   details: string;
+  detail_options?: unknown;
   sort_order: number;
   is_active: boolean;
   created_at: string;
@@ -158,8 +159,9 @@ function getErrorMessage(error: unknown, fallback: string) {
     message.includes('storage_locations')
     || message.includes('role')
     || message.includes('is_workspace_admin')
+    || message.includes('detail_options')
   ) {
-    return '管理者画面用の設定がまだ Supabase に追加されていません。`supabase/add_admin_storage_locations.sql` を実行してください。';
+    return '管理者画面用の設定がまだ Supabase に追加されていません。`supabase/add_admin_storage_locations.sql` または `supabase/add_storage_location_detail_options.sql` を実行してください。';
   }
 
   if (
@@ -189,6 +191,20 @@ function isLikelyExistingSignupResult(user: User | null) {
 function normalizeNumber(value: unknown, fallback = 0) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
+}
+
+function normalizeStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean),
+    ),
+  );
 }
 
 function mapInventoryRow(row: InventoryRow): InventoryItem {
@@ -223,6 +239,7 @@ function mapStorageLocationRow(row: StorageLocationRow): StorageLocation {
     id: row.id,
     name: row.name,
     details: row.details ?? '',
+    detailOptions: normalizeStringArray(row.detail_options),
     sortOrder: normalizeNumber(row.sort_order),
     isActive: row.is_active,
     createdAt: row.created_at,
@@ -355,6 +372,7 @@ function prepareStorageLocationPayload(payload: StorageLocationDraft) {
   return {
     name: payload.name.trim(),
     details: payload.details.trim(),
+    detail_options: normalizeStringArray(payload.detailOptions),
     sort_order: normalizeNumber(payload.sortOrder),
     is_active: payload.isActive,
   };

@@ -51,11 +51,15 @@ create table if not exists public.storage_locations (
   id text primary key default ('loc_' || replace(gen_random_uuid()::text, '-', '')),
   name text not null,
   details text not null default '',
+  detail_options jsonb not null default '[]'::jsonb,
   sort_order integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.storage_locations
+  add column if not exists detail_options jsonb not null default '[]'::jsonb;
 
 create unique index if not exists storage_locations_name_lower_idx
   on public.storage_locations (lower(name));
