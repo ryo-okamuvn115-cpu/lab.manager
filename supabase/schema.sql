@@ -77,6 +77,7 @@ create table if not exists public.inventory_items (
   supplier text not null default 'other',
   location text not null default '',
   location_preset text not null default '',
+  location_field_values jsonb not null default '[]'::jsonb,
   location_detail text not null default '',
   location_image_path text not null default '',
   notes text not null default '',
@@ -88,7 +89,7 @@ create table if not exists public.storage_locations (
   id text primary key default ('loc_' || replace(gen_random_uuid()::text, '-', '')),
   name text not null,
   details text not null default '',
-  detail_options jsonb not null default '[]'::jsonb,
+  detail_fields jsonb not null default '[]'::jsonb,
   sort_order integer not null default 0,
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
@@ -105,13 +106,16 @@ alter table public.inventory_items
   add column if not exists location_preset text not null default '';
 
 alter table public.inventory_items
+  add column if not exists location_field_values jsonb not null default '[]'::jsonb;
+
+alter table public.inventory_items
   add column if not exists location_detail text not null default '';
 
 alter table public.inventory_items
   add column if not exists location_image_path text not null default '';
 
 alter table public.storage_locations
-  add column if not exists detail_options jsonb not null default '[]'::jsonb;
+  add column if not exists detail_fields jsonb not null default '[]'::jsonb;
 
 do $$
 begin

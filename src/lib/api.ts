@@ -9,6 +9,7 @@ import type {
   InventoryCategory,
   InventoryItem,
   InventoryItemDraft,
+  InventoryLocationFieldValue,
   InventorySupplier,
   LabSnapshot,
   Order,
@@ -21,6 +22,7 @@ import type {
   ProtocolStep,
   SnapshotEvent,
   StorageLocation,
+  StorageLocationDetailField,
   StorageLocationDraft,
   WorkspaceAccess,
   WorkspaceRole,
@@ -37,6 +39,7 @@ interface InventoryRow {
   supplier: InventorySupplier;
   location: string;
   location_preset?: string | null;
+  location_field_values?: unknown;
   location_detail?: string | null;
   location_image_path?: string | null;
   notes: string;
@@ -71,7 +74,7 @@ interface StorageLocationRow {
   id: string;
   name: string;
   details: string;
-  detail_options?: unknown;
+  detail_fields?: unknown;
   sort_order: number;
   is_active: boolean;
   created_at: string;
@@ -160,8 +163,9 @@ function getErrorMessage(error: unknown, fallback: string) {
     || message.includes('role')
     || message.includes('is_workspace_admin')
     || message.includes('detail_options')
+    || message.includes('detail_fields')
   ) {
-    return '管理者画面用の設定がまだ Supabase に追加されていません。`supabase/add_admin_storage_locations.sql` または `supabase/add_storage_location_detail_options.sql` を実行してください。';
+    return '管理者画面用の設定がまだ Supabase に追加されていません。`supabase/add_admin_storage_locations.sql` または `supabase/add_storage_location_detail_fields.sql` を実行してください。';
   }
 
   if (
@@ -169,8 +173,9 @@ function getErrorMessage(error: unknown, fallback: string) {
     || message.includes('location_preset')
     || message.includes('location_detail')
     || message.includes('location_image_path')
+    || message.includes('location_field_values')
   ) {
-    return '保管場所の新しい項目がまだ Supabase に追加されていません。`supabase/add_inventory_location_fields.sql` を実行してください。';
+    return '保管場所の新しい項目がまだ Supabase に追加されていません。`supabase/add_storage_location_detail_fields.sql` を実行してください。';
   }
 
   if (message.includes('Bucket not found') || message.includes('inventory-location-images')) {
@@ -193,25 +198,80 @@ function normalizeNumber(value: unknown, fallback = 0) {
   return Number.isFinite(next) ? next : fallback;
 }
 
-function normalizeStringArray(value: unknown) {
+function normalizeLocationFieldValues(value: unknown): InventoryLocationFieldValue[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return Array.from(
-    new Set(
-      value
-        .map((item) => (typeof item === 'string' ? item.trim() : ''))
-        .filter(Boolean),
-    ),
-  );
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const record = item as Partial<InventoryLocationFieldValue>;
+      const fieldId = typeof record.fieldId === 'string' ? record.fieldId.trim() : '';
+      const fieldValue = typeof record.value === 'string' ? record.value.trim() : '';
+
+      if (!fieldId || !fieldValue) {
+        return null;
+      }
+
+      return {
+        fieldId,
+        value: fieldValue,
+      } satisfies InventoryLocationFieldValue;
+    })
+    .filter((item): item is InventoryLocationFieldValue => item !== null);
+}
+
+function normalizeDetailFields(value: unknown): StorageLocationDetailField[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const record = item as Partial<StorageLocationDetailField>;
+      const label = typeof record.label === 'string' ? record.label.trim() : '';
+      const id =
+        typeof record.id === 'string' && record.id.trim()
+          ? record.id.trim()
+          : createId('loc_field');
+
+      if (!label) {
+        return null;
+      }
+
+      const options = Array.isArray(record.options)
+        ? Array.from(
+            new Set(
+              record.options
+                .map((option) => (typeof option === 'string' ? option.trim() : ''))
+                .filter(Boolean),
+            ),
+          )
+        : [];
+
+      return {
+        id,
+        label,
+        options,
+      } satisfies StorageLocationDetailField;
+    })
+    .filter((field): field is StorageLocationDetailField => field !== null);
 }
 
 function mapInventoryRow(row: InventoryRow): InventoryItem {
   const locationPreset = row.location_preset ?? '';
+  const locationFieldValues = normalizeLocationFieldValues(row.location_field_values);
   const locationDetail =
     row.location_detail ?? (!locationPreset && row.location ? row.location : '');
-  const location = row.location ?? buildInventoryLocation(locationPreset, locationDetail);
+  const location = row.location ?? buildInventoryLocation(locationPreset, locationFieldValues, locationDetail);
   const locationImagePath = row.location_image_path ?? '';
 
   return {
@@ -225,6 +285,7 @@ function mapInventoryRow(row: InventoryRow): InventoryItem {
     supplier: row.supplier ?? 'other',
     location,
     locationPreset,
+    locationFieldValues,
     locationDetail,
     locationImagePath,
     locationImageUrl: locationImagePath ? getInventoryLocationImageUrl(locationImagePath) : null,
@@ -239,7 +300,7 @@ function mapStorageLocationRow(row: StorageLocationRow): StorageLocation {
     id: row.id,
     name: row.name,
     details: row.details ?? '',
-    detailOptions: normalizeStringArray(row.detail_options),
+    detailFields: normalizeDetailFields(row.detail_fields),
     sortOrder: normalizeNumber(row.sort_order),
     isActive: row.is_active,
     createdAt: row.created_at,
@@ -352,6 +413,10 @@ function buildSnapshotUpdatedAt(groups: Array<Array<{ updatedAt: string }>>) {
 }
 
 function prepareInventoryPayload(payload: InventoryItemDraft) {
+  const locationPreset = payload.locationPreset.trim();
+  const locationFieldValues = normalizeLocationFieldValues(payload.locationFieldValues);
+  const locationDetail = payload.locationDetail.trim();
+
   return {
     name: payload.name.trim(),
     category: payload.category,
@@ -360,19 +425,22 @@ function prepareInventoryPayload(payload: InventoryItemDraft) {
     min_quantity: normalizeNumber(payload.minQuantity),
     expiry_date: payload.expiryDate.trim() || null,
     supplier: payload.supplier,
-    location: buildInventoryLocation(payload.locationPreset, payload.locationDetail),
-    location_preset: payload.locationPreset.trim(),
-    location_detail: payload.locationDetail.trim(),
+    location: buildInventoryLocation(locationPreset, locationFieldValues, locationDetail),
+    location_preset: locationPreset,
+    location_field_values: locationFieldValues,
+    location_detail: locationDetail,
     location_image_path: payload.locationImagePath.trim(),
     notes: payload.notes.trim(),
   };
 }
 
 function prepareStorageLocationPayload(payload: StorageLocationDraft) {
+  const detailFields = normalizeDetailFields(payload.detailFields);
+
   return {
     name: payload.name.trim(),
     details: payload.details.trim(),
-    detail_options: normalizeStringArray(payload.detailOptions),
+    detail_fields: detailFields,
     sort_order: normalizeNumber(payload.sortOrder),
     is_active: payload.isActive,
   };
@@ -650,7 +718,7 @@ export const storageAPI = {
     if (oldName && oldName !== nextLocation.name) {
       const affected = await client
         .from('inventory_items')
-        .select('id, location_detail')
+        .select('id, location_detail, location_field_values')
         .eq('location_preset', oldName);
 
       if (affected.error) {
@@ -659,11 +727,14 @@ export const storageAPI = {
 
       const updates = (affected.data ?? []).map((row) => {
         const locationDetail = typeof row.location_detail === 'string' ? row.location_detail : '';
+        const locationFieldValues = normalizeLocationFieldValues(
+          'location_field_values' in row ? row.location_field_values : [],
+        );
         return client
           .from('inventory_items')
           .update({
             location_preset: nextLocation.name,
-            location: buildInventoryLocation(nextLocation.name, locationDetail),
+            location: buildInventoryLocation(nextLocation.name, locationFieldValues, locationDetail),
           })
           .eq('id', row.id);
       });

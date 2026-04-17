@@ -43,6 +43,7 @@ export interface InventoryItem {
   supplier: InventorySupplier;
   location: string;
   locationPreset: string;
+  locationFieldValues: InventoryLocationFieldValue[];
   locationDetail: string;
   locationImagePath: string;
   locationImageUrl: string | null;
@@ -60,17 +61,29 @@ export interface InventoryItemDraft {
   expiryDate: string;
   supplier: InventorySupplier;
   locationPreset: string;
+  locationFieldValues: InventoryLocationFieldValue[];
   locationDetail: string;
   locationImagePath: string;
   locationImageUrl: string | null;
   notes: string;
 }
 
+export interface StorageLocationDetailField {
+  id: string;
+  label: string;
+  options: string[];
+}
+
+export interface InventoryLocationFieldValue {
+  fieldId: string;
+  value: string;
+}
+
 export interface StorageLocation {
   id: string;
   name: string;
   details: string;
-  detailOptions: string[];
+  detailFields: StorageLocationDetailField[];
   sortOrder: number;
   isActive: boolean;
   createdAt: string;
@@ -80,7 +93,7 @@ export interface StorageLocation {
 export interface StorageLocationDraft {
   name: string;
   details: string;
-  detailOptions: string[];
+  detailFields: StorageLocationDetailField[];
   sortOrder: number;
   isActive: boolean;
 }
@@ -220,9 +233,29 @@ export const PROTOCOL_DIFFICULTY_LABELS: Record<ProtocolDifficulty, string> = {
 export const ORDER_STATUSES: OrderStatus[] = ['draft', 'submitted', 'approved', 'received'];
 export const PROTOCOL_DIFFICULTIES: ProtocolDifficulty[] = ['easy', 'medium', 'hard'];
 
-export function buildInventoryLocation(locationPreset: string, locationDetail: string) {
+export function createStorageLocationDetailField(
+  label = '',
+  options: string[] = [],
+): StorageLocationDetailField {
+  return {
+    id:
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `field_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+    label,
+    options,
+  };
+}
+
+export function buildInventoryLocation(
+  locationPreset: string,
+  locationFieldValues: InventoryLocationFieldValue[] = [],
+  locationDetail = '',
+) {
   const preset = locationPreset.trim();
-  const detail = locationDetail.trim();
+  const detailParts = locationFieldValues.map((field) => field.value.trim()).filter(Boolean);
+  const freeText = locationDetail.trim();
+  const detail = [...detailParts, freeText].filter(Boolean).join(' / ');
 
   if (preset && detail) {
     return `${preset} / ${detail}`;
@@ -241,6 +274,7 @@ export function createEmptyInventoryDraft(): InventoryItemDraft {
     expiryDate: '',
     supplier: 'other',
     locationPreset: '',
+    locationFieldValues: [],
     locationDetail: '',
     locationImagePath: '',
     locationImageUrl: null,
@@ -267,7 +301,7 @@ export function createEmptyStorageLocationDraft(): StorageLocationDraft {
   return {
     name: '',
     details: '',
-    detailOptions: [],
+    detailFields: [],
     sortOrder: 0,
     isActive: true,
   };
