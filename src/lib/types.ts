@@ -1,6 +1,6 @@
 export type Page = 'home' | 'inventory' | 'orders' | 'protocols' | 'admin';
 
-export type InventoryCategory = 'protein' | 'antibody' | 'reagent' | 'other';
+export type InventoryCategory = 'protein' | 'antibody' | 'reagent' | 'plasmid' | 'other';
 export type InventorySupplier = 'tone-kagaku' | 'ikeda-rika' | 'yaken' | 'ut' | 'other';
 export type OrderStatus = 'draft' | 'submitted' | 'approved' | 'received';
 export type ProtocolDifficulty = 'easy' | 'medium' | 'hard';
@@ -190,6 +190,7 @@ export const INVENTORY_FILTERS: Array<InventoryCategory | 'all'> = [
   'protein',
   'antibody',
   'reagent',
+  'plasmid',
   'other',
 ];
 
@@ -198,6 +199,7 @@ export const INVENTORY_CATEGORY_LABELS: Record<InventoryCategory | 'all', string
   protein: 'タンパク質',
   antibody: '抗体',
   reagent: '試薬',
+  plasmid: 'プラスミド',
   other: 'その他',
 };
 

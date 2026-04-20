@@ -69,7 +69,7 @@ $$;
 create table if not exists public.inventory_items (
   id text primary key default ('inv_' || replace(gen_random_uuid()::text, '-', '')),
   name text not null,
-  category text not null check (category in ('protein', 'antibody', 'reagent', 'other')),
+  category text not null check (category in ('protein', 'antibody', 'reagent', 'plasmid', 'other')),
   quantity double precision not null default 0 check (quantity >= 0),
   unit text not null,
   min_quantity double precision not null default 0 check (min_quantity >= 0),
