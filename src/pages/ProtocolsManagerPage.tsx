@@ -464,14 +464,18 @@ export default function ProtocolsManagerPage({
                                 <span className="text-xs text-slate-500">{step.duration || '所要時間未設定'}</span>
                               </div>
                               <p className="mt-2 text-sm text-slate-600">{step.description}</p>
-                              <div className="mt-3 flex flex-wrap gap-2">
+                              <div className="mt-3">
+                                <div className="mb-2 text-xs font-medium text-slate-500">
+                                  使用試薬 {step.materials.length > 0 ? '（クリックで保管場所）' : ''}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
                                 {step.materials.length > 0 ? (
                                   step.materials.map((material, materialIndex) => (
                                     <button
                                       key={`${step.id}-${material}-${materialIndex}`}
                                       type="button"
                                       onClick={() => openMaterialLookup(protocol.title, step.title, material)}
-                                      className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 transition hover:bg-blue-50 hover:text-blue-700"
+                                      className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 underline underline-offset-2 transition hover:bg-blue-100 hover:text-blue-800"
                                     >
                                       {material}
                                     </button>
@@ -479,6 +483,7 @@ export default function ProtocolsManagerPage({
                                 ) : (
                                   <span className="text-xs text-slate-500">使用材料なし</span>
                                 )}
+                                </div>
                               </div>
                             </div>
                           </div>
