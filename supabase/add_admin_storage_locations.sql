@@ -3,6 +3,9 @@ create extension if not exists pgcrypto;
 alter table public.workspace_members
   add column if not exists role text not null default 'member';
 
+alter table public.workspace_members
+  add column if not exists receives_order_digest boolean not null default false;
+
 do $$
 begin
   if not exists (

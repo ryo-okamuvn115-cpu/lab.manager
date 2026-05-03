@@ -6,6 +6,19 @@ export type OrderStatus = 'draft' | 'submitted' | 'approved' | 'received';
 export type ProtocolDifficulty = 'easy' | 'medium' | 'hard';
 export type WorkspaceRole = 'member' | 'admin';
 
+export interface WorkspaceMember {
+  email: string;
+  role: WorkspaceRole;
+  receivesOrderDigest: boolean;
+  createdAt: string | null;
+}
+
+export interface WorkspaceMemberDraft {
+  email: string;
+  role: WorkspaceRole;
+  receivesOrderDigest: boolean;
+}
+
 export const INVENTORY_LOCATION_PRESETS = [
   '-30℃冷凍庫(白色)',
   '-30℃冷凍庫（番号34）',

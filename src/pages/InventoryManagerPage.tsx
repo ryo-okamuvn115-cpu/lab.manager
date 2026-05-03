@@ -5,6 +5,7 @@ import FormField from '@/components/FormField';
 import Modal from '@/components/Modal';
 import { storageAPI } from '@/lib/api';
 import { formatDate, formatDateTime, formatRelativeDays } from '@/lib/format';
+import { matchesInventorySearch } from '@/lib/inventorySearch';
 import {
   INVENTORY_CATEGORY_LABELS,
   INVENTORY_FILTERS,
@@ -119,14 +120,7 @@ export default function InventoryManagerPage({
     return [...items]
       .filter((item) => category === 'all' || item.category === category)
       .filter((item) => {
-        if (!keyword) {
-          return true;
-        }
-
-        return [item.name, INVENTORY_SUPPLIER_LABELS[item.supplier], item.location, item.notes]
-          .join(' ')
-          .toLowerCase()
-          .includes(keyword);
+        return matchesInventorySearch(item, keyword);
       })
       .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
   }, [category, deferredSearch, items]);

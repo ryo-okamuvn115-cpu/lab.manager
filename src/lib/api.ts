@@ -25,6 +25,8 @@ import type {
   StorageLocationDetailField,
   StorageLocationDraft,
   WorkspaceAccess,
+  WorkspaceMember,
+  WorkspaceMemberDraft,
   WorkspaceRole,
 } from '@/lib/types';
 
@@ -84,6 +86,8 @@ interface StorageLocationRow {
 interface WorkspaceMemberRow {
   email: string;
   role: WorkspaceRole | null;
+  receives_order_digest?: boolean | null;
+  created_at?: string | null;
 }
 
 interface AuthCredentials {
@@ -176,6 +180,10 @@ function getErrorMessage(error: unknown, fallback: string) {
     || message.includes('location_field_values')
   ) {
     return '保管場所の新しい項目がまだ Supabase に追加されていません。`supabase/add_storage_location_detail_fields.sql` を実行してください。';
+  }
+
+  if (message.includes('receives_order_digest')) {
+    return '発注通知先の設定がまだ Supabase に追加されていません。`supabase/add_order_digest_settings.sql` を実行してください。';
   }
 
   if (message.includes('Bucket not found') || message.includes('inventory-location-images')) {
@@ -434,6 +442,15 @@ function prepareInventoryPayload(payload: InventoryItemDraft) {
   };
 }
 
+function mapWorkspaceMemberRow(row: WorkspaceMemberRow): WorkspaceMember {
+  return {
+    email: row.email.trim(),
+    role: row.role === 'admin' ? 'admin' : 'member',
+    receivesOrderDigest: Boolean(row.receives_order_digest),
+    createdAt: row.created_at ?? null,
+  };
+}
+
 function prepareStorageLocationPayload(payload: StorageLocationDraft) {
   const detailFields = normalizeDetailFields(payload.detailFields);
 
@@ -643,6 +660,65 @@ export const accessAPI = {
   async hasWorkspaceAccess() {
     const access = await this.getWorkspaceAccess();
     return access.allowed;
+  },
+};
+
+export const adminAPI = {
+  async listWorkspaceMembers(): Promise<WorkspaceMember[]> {
+    const client = getClient();
+    const response = await client
+      .from('workspace_members')
+      .select('email, role, created_at, receives_order_digest')
+      .order('email', { ascending: true });
+
+    if (response.error) {
+      const message = response.error.message ?? '';
+      const code = response.error.code ?? '';
+
+      if (code === 'PGRST204' || message.includes('receives_order_digest')) {
+        const fallback = await client
+          .from('workspace_members')
+          .select('email, role, created_at')
+          .order('email', { ascending: true });
+
+        if (fallback.error) {
+          throw new Error(getErrorMessage(fallback.error, '研究室メンバー一覧を取得できませんでした。'));
+        }
+
+        return (fallback.data ?? []).map((row) =>
+          mapWorkspaceMemberRow({
+            ...(row as WorkspaceMemberRow),
+            receives_order_digest: false,
+          }),
+        );
+      }
+
+      throw new Error(getErrorMessage(response.error, '研究室メンバー一覧を取得できませんでした。'));
+    }
+
+    return (response.data ?? []).map((row) => mapWorkspaceMemberRow(row as WorkspaceMemberRow));
+  },
+
+  async upsertWorkspaceMember(payload: WorkspaceMemberDraft): Promise<WorkspaceMember> {
+    const client = getClient();
+    const response = await client
+      .from('workspace_members')
+      .upsert(
+        {
+          email: payload.email.trim(),
+          role: payload.role,
+          receives_order_digest: payload.receivesOrderDigest,
+        },
+        { onConflict: 'email' },
+      )
+      .select('email, role, created_at, receives_order_digest')
+      .single();
+
+    if (response.error) {
+      throw new Error(getErrorMessage(response.error, '研究室メンバー設定を保存できませんでした。'));
+    }
+
+    return mapWorkspaceMemberRow(response.data as WorkspaceMemberRow);
   },
 };
 

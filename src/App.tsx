@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import AccessPendingPage from '@/components/AccessPendingPage';
 import AuthPage from '@/components/AuthPage';
 import Navigation from '@/components/Navigation';
@@ -13,10 +13,16 @@ import ProtocolsManagerPage from '@/pages/ProtocolsManagerPage';
 import { accessAPI, authAPI } from '@/lib/api';
 import { useLabManager } from '@/hooks/useLabManager';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import type { Page, WorkspaceRole } from '@/lib/types';
+import type { OrderDraft, Page, WorkspaceRole } from '@/lib/types';
 
 type AccessState = 'idle' | 'checking' | 'granted' | 'denied';
 type AuthFlow = 'default' | 'recovery';
+
+interface OrderComposerRequest {
+  requestId: string;
+  draft: OrderDraft;
+  notice?: string;
+}
 
 function FullScreenMessage({
   title,
@@ -46,6 +52,7 @@ function App() {
   const [accessState, setAccessState] = useState<AccessState>('idle');
   const [accessError, setAccessError] = useState<string | null>(null);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
+  const [orderComposerRequest, setOrderComposerRequest] = useState<OrderComposerRequest | null>(null);
   const isAppReady = Boolean(session) && accessState === 'granted';
   const isAdmin = workspaceRole === 'admin';
 
@@ -297,6 +304,21 @@ function App() {
     }
   }, []);
 
+  const handleProtocolOrderRequest = useCallback(
+    (draft: OrderDraft, notice: string) => {
+      setOrderComposerRequest({
+        requestId:
+          typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID()
+            : `order_request_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        draft,
+        notice,
+      });
+      setCurrentPage('orders');
+    },
+    [],
+  );
+
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
@@ -324,15 +346,17 @@ function App() {
             onDelete={deleteInventoryItem}
           />
         );
-      case 'admin':
-        return (
+        case 'admin':
+          return (
           <AdminSettingsPage
             locations={snapshot?.storageLocations ?? []}
             inventoryItems={snapshot?.inventory ?? []}
+            orders={snapshot?.orders ?? []}
             loading={loading}
             saving={saving}
             error={error}
             lastSyncAt={snapshot?.updatedAt ?? null}
+            currentUserEmail={session?.user.email ?? null}
             onCreateLocation={createStorageLocation}
             onUpdateLocation={updateStorageLocation}
             onDeleteLocation={deleteStorageLocation}
@@ -346,6 +370,8 @@ function App() {
             saving={saving}
             error={error}
             lastSyncAt={snapshot?.updatedAt ?? null}
+            composerRequest={orderComposerRequest}
+            onComposerRequestHandled={() => setOrderComposerRequest(null)}
             onCreate={createOrder}
             onUpdate={updateOrder}
             onDelete={deleteOrder}
@@ -355,10 +381,13 @@ function App() {
         return (
           <ProtocolsManagerPage
             protocols={snapshot?.protocols ?? []}
+            inventoryItems={snapshot?.inventory ?? []}
             loading={loading}
             saving={saving}
             error={error}
             lastSyncAt={snapshot?.updatedAt ?? null}
+            onOpenInventory={() => setCurrentPage('inventory')}
+            onRequestOrder={handleProtocolOrderRequest}
             onCreate={createProtocol}
             onUpdate={updateProtocol}
             onDelete={deleteProtocol}

@@ -4,21 +4,27 @@ import ErrorBanner from '@/components/ErrorBanner';
 import FormField from '@/components/FormField';
 import Modal from '@/components/Modal';
 import { formatDateTime } from '@/lib/format';
+import { matchesInventorySearch } from '@/lib/inventorySearch';
 import {
   createEmptyProtocolDraft,
+  INVENTORY_CATEGORY_LABELS,
+  INVENTORY_SUPPLIER_LABELS,
   PROTOCOL_DIFFICULTIES,
   PROTOCOL_DIFFICULTY_LABELS,
+  type InventoryItem,
   type Protocol,
   type ProtocolDifficulty,
   type ProtocolDraft,
 } from '@/lib/types';
+import { createOrderDraftFromProtocolMaterial } from '@/lib/orders';
 
 interface ProtocolStepFormState {
   id: string;
   title: string;
   description: string;
   duration: string;
-  materialsText: string;
+  materials: string[];
+  materialInput: string;
 }
 
 interface ProtocolFormState {
@@ -32,13 +38,23 @@ interface ProtocolFormState {
 
 interface ProtocolsManagerPageProps {
   protocols: Protocol[];
+  inventoryItems: InventoryItem[];
   loading: boolean;
   saving: boolean;
   error: Error | null;
   lastSyncAt: string | null;
+  onOpenInventory: () => void;
+  onRequestOrder: (payload: ReturnType<typeof createOrderDraftFromProtocolMaterial>, notice: string) => void;
   onCreate: (payload: ProtocolDraft) => Promise<unknown>;
   onUpdate: (id: string, payload: ProtocolDraft) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
+}
+
+interface MaterialLookupState {
+  protocolTitle: string;
+  stepTitle: string;
+  materialName: string;
+  matches: InventoryItem[];
 }
 
 const inputClassName =
@@ -61,7 +77,8 @@ function createStepFormState(step: Partial<Omit<ProtocolStepFormState, 'id'>> = 
     title: step.title ?? '',
     description: step.description ?? '',
     duration: step.duration ?? '',
-    materialsText: step.materialsText ?? '',
+    materials: step.materials ?? [],
+    materialInput: step.materialInput ?? '',
   };
 }
 
@@ -76,7 +93,7 @@ function toFormState(protocol: Protocol): ProtocolFormState {
       title: step.title,
       description: step.description,
       duration: step.duration,
-      materialsText: step.materials.join(', '),
+      materials: step.materials,
     })),
   };
 }
@@ -94,7 +111,7 @@ function emptyFormState(): ProtocolFormState {
       title: step.title,
       description: step.description,
       duration: step.duration,
-      materialsText: '',
+      materials: step.materials,
     })),
   };
 }
@@ -111,21 +128,51 @@ function toDraft(form: ProtocolFormState): ProtocolDraft {
         title: step.title.trim(),
         description: step.description.trim(),
         duration: step.duration.trim(),
-        materials: step.materialsText
-          .split(/,|\n/)
-          .map((material) => material.trim())
-          .filter(Boolean),
+        materials: Array.from(
+          new Set(
+            step.materials
+              .map((material) => material.trim())
+              .filter(Boolean),
+          ),
+        ),
       }))
       .filter((step) => step.title.length > 0 || step.description.length > 0),
   };
 }
 
+function normalizeMaterialValue(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function buildMaterialSuggestions(
+  inventoryNames: string[],
+  materialInput: string,
+  selectedMaterials: string[],
+) {
+  const normalizedInput = normalizeMaterialValue(materialInput).toLowerCase();
+  const selected = new Set(selectedMaterials.map((material) => normalizeMaterialValue(material).toLowerCase()));
+
+  if (!normalizedInput) {
+    return [];
+  }
+
+  return inventoryNames
+    .filter((name) => {
+      const normalizedName = normalizeMaterialValue(name).toLowerCase();
+      return normalizedName.includes(normalizedInput) && !selected.has(normalizedName);
+    })
+    .slice(0, 8);
+}
+
 export default function ProtocolsManagerPage({
   protocols,
+  inventoryItems,
   loading,
   saving,
   error,
   lastSyncAt,
+  onOpenInventory,
+  onRequestOrder,
   onCreate,
   onUpdate,
   onDelete,
@@ -134,10 +181,23 @@ export default function ProtocolsManagerPage({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProtocol, setEditingProtocol] = useState<Protocol | null>(null);
   const [form, setForm] = useState<ProtocolFormState>(emptyFormState());
+  const [materialLookup, setMaterialLookup] = useState<MaterialLookupState | null>(null);
 
   const sortedProtocols = useMemo(
     () => [...protocols].sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()),
     [protocols],
+  );
+
+  const inventoryMaterialNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          inventoryItems
+            .map((item) => item.name.trim())
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right, 'ja')),
+    [inventoryItems],
   );
 
   const openCreateModal = () => {
@@ -169,6 +229,74 @@ export default function ProtocolsManagerPage({
     }));
   };
 
+  const addMaterialToStep = (stepId: string, rawMaterial?: string) => {
+    setForm((current) => ({
+      ...current,
+      steps: current.steps.map((step) => {
+        if (step.id !== stepId) {
+          return step;
+        }
+
+        const nextMaterial = normalizeMaterialValue(rawMaterial ?? step.materialInput);
+
+        if (!nextMaterial) {
+          return step;
+        }
+
+        const hasDuplicate = step.materials.some(
+          (material) => normalizeMaterialValue(material).toLowerCase() === nextMaterial.toLowerCase(),
+        );
+
+        return {
+          ...step,
+          materials: hasDuplicate ? step.materials : [...step.materials, nextMaterial],
+          materialInput: '',
+        };
+      }),
+    }));
+  };
+
+  const removeMaterialFromStep = (stepId: string, materialToRemove: string) => {
+    setForm((current) => ({
+      ...current,
+      steps: current.steps.map((step) =>
+        step.id === stepId
+          ? {
+              ...step,
+              materials: step.materials.filter((material) => material !== materialToRemove),
+            }
+          : step,
+      ),
+    }));
+  };
+
+  const openMaterialLookup = (protocolTitle: string, stepTitle: string, materialName: string) => {
+    const matches = inventoryItems.filter((item) => matchesInventorySearch(item, materialName));
+
+    setMaterialLookup({
+      protocolTitle,
+      stepTitle,
+      materialName,
+      matches,
+    });
+  };
+
+  const handleOrderRequest = () => {
+    if (!materialLookup) {
+      return;
+    }
+
+    onRequestOrder(
+      createOrderDraftFromProtocolMaterial({
+        materialName: materialLookup.materialName,
+        protocolTitle: materialLookup.protocolTitle,
+        stepTitle: materialLookup.stepTitle,
+      }),
+      `プロトコル「${materialLookup.protocolTitle}」の試薬「${materialLookup.materialName}」を発注フォームに追加しました。`,
+    );
+    setMaterialLookup(null);
+  };
+
   const addStep = () => {
     setForm((current) => ({
       ...current,
@@ -190,7 +318,7 @@ export default function ProtocolsManagerPage({
   const submitForm = async () => {
     const hasIncompleteStep = form.steps.some((step) => {
       const hasAnyValue =
-        step.title.trim() || step.description.trim() || step.duration.trim() || step.materialsText.trim();
+        step.title.trim() || step.description.trim() || step.duration.trim() || step.materials.length > 0;
 
       return Boolean(hasAnyValue) && (!step.title.trim() || !step.description.trim());
     });
@@ -338,10 +466,15 @@ export default function ProtocolsManagerPage({
                               <p className="mt-2 text-sm text-slate-600">{step.description}</p>
                               <div className="mt-3 flex flex-wrap gap-2">
                                 {step.materials.length > 0 ? (
-                                  step.materials.map((material) => (
-                                    <span key={material} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                                  step.materials.map((material, materialIndex) => (
+                                    <button
+                                      key={`${step.id}-${material}-${materialIndex}`}
+                                      type="button"
+                                      onClick={() => openMaterialLookup(protocol.title, step.title, material)}
+                                      className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 transition hover:bg-blue-50 hover:text-blue-700"
+                                    >
                                       {material}
-                                    </span>
+                                    </button>
                                   ))
                                 ) : (
                                   <span className="text-xs text-slate-500">使用材料なし</span>
@@ -373,7 +506,7 @@ export default function ProtocolsManagerPage({
         description="更新内容は研究室のメンバー全員にすぐ共有されます。"
         footer={
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-slate-500">材料はカンマ区切りまたは改行区切りで入力してください。</div>
+            <div className="text-xs text-slate-500">試薬名を入力して「追加」するか、在庫候補から選んで登録できます。</div>
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
@@ -507,18 +640,161 @@ export default function ProtocolsManagerPage({
 
                 <div className="mt-4">
                   <FormField label="使用材料">
-                    <textarea
-                      rows={2}
-                      value={step.materialsText}
-                      onChange={(event) => updateStep(step.id, { materialsText: event.target.value })}
-                      className={inputClassName}
-                    />
+                    <div className="space-y-3">
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          value={step.materialInput}
+                          onChange={(event) => updateStep(step.id, { materialInput: event.target.value })}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              addMaterialToStep(step.id);
+                            }
+                          }}
+                          placeholder="試薬名を入力して Enter または追加"
+                          className={inputClassName}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addMaterialToStep(step.id)}
+                          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                          追加
+                        </button>
+                      </div>
+
+                      {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).length > 0 ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                          <div className="mb-2 text-xs font-medium text-slate-500">在庫から候補を追加</div>
+                          <div className="flex flex-wrap gap-2">
+                            {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).map((material) => (
+                              <button
+                                key={`${step.id}-suggestion-${material}`}
+                                type="button"
+                                onClick={() => addMaterialToStep(step.id, material)}
+                                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
+                              >
+                                {material}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="mb-2 text-xs font-medium text-slate-500">登録済み試薬</div>
+                        {step.materials.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {step.materials.map((material) => (
+                              <button
+                                key={`${step.id}-material-${material}`}
+                                type="button"
+                                onClick={() => removeMaterialFromStep(step.id, material)}
+                                className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 transition hover:bg-rose-50 hover:text-rose-600"
+                              >
+                                {material} ×
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-400">まだ追加されていません</div>
+                        )}
+                      </div>
+                    </div>
                   </FormField>
                 </div>
               </div>
             ))}
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(materialLookup)}
+        onClose={() => setMaterialLookup(null)}
+        title={materialLookup ? `${materialLookup.materialName} の保管場所` : '試薬の保管場所'}
+        description={
+          materialLookup
+            ? `プロトコル「${materialLookup.protocolTitle}」 / 手順「${materialLookup.stepTitle}」`
+            : undefined
+        }
+        footer={
+          materialLookup ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setMaterialLookup(null);
+                  onOpenInventory();
+                }}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 sm:w-auto"
+              >
+                在庫画面で確認
+              </button>
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setMaterialLookup(null)}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 sm:w-auto"
+                >
+                  閉じる
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOrderRequest}
+                  className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 sm:w-auto"
+                >
+                  発注画面へ
+                </button>
+              </div>
+            </div>
+          ) : null
+        }
+      >
+        {materialLookup ? (
+          materialLookup.matches.length > 0 ? (
+            <div className="space-y-3">
+              {materialLookup.matches.map((item) => {
+                const isLowStock = item.quantity <= item.minQuantity;
+
+                return (
+                  <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="text-base font-semibold text-slate-900">{item.name}</div>
+                        <div className="mt-1 text-sm text-slate-500">{item.location || '保管場所未設定'}</div>
+                      </div>
+                      <span
+                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                          isLowStock ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        {isLowStock ? '在庫不足' : '在庫あり'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                      <div>現在庫: {item.quantity} {item.unit}</div>
+                      <div>最低在庫: {item.minQuantity} {item.unit}</div>
+                      <div>カテゴリ: {INVENTORY_CATEGORY_LABELS[item.category]}</div>
+                      <div>発注元: {INVENTORY_SUPPLIER_LABELS[item.supplier]}</div>
+                    </div>
+
+                    {item.notes ? (
+                      <div className="mt-3 rounded-xl bg-white px-3 py-2 text-sm text-slate-600 ring-1 ring-slate-200">
+                        {item.notes}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm leading-6 text-slate-600">
+              一致する在庫が見つかりませんでした。必要ならこのまま発注画面へ進んで、試薬名を入れた状態から注文を作れます。
+            </div>
+          )
+        ) : null}
       </Modal>
     </div>
   );

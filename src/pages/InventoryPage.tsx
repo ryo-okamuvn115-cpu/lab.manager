@@ -4,6 +4,7 @@ import ErrorBanner from '@/components/ErrorBanner';
 import { useData } from '@/hooks/useData';
 import { storageAPI } from '@/lib/api';
 import { formatDate } from '@/lib/format';
+import { matchesInventorySearch } from '@/lib/inventorySearch';
 import {
   INVENTORY_CATEGORY_LABELS,
   INVENTORY_FILTERS,
@@ -23,14 +24,10 @@ export default function InventoryPage() {
 
   const filteredItems = useMemo(() => {
     const items = inventory ?? [];
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const normalizedSearch = searchTerm.trim();
 
     return items.filter((item) => {
-      const matchesSearch =
-        normalizedSearch.length === 0 ||
-        item.name.toLowerCase().includes(normalizedSearch) ||
-        item.location.toLowerCase().includes(normalizedSearch) ||
-        item.notes.toLowerCase().includes(normalizedSearch);
+      const matchesSearch = matchesInventorySearch(item, normalizedSearch);
       const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });

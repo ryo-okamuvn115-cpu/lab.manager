@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Edit3, Plus, Trash2 } from 'lucide-react';
 import ErrorBanner from '@/components/ErrorBanner';
 import FormField from '@/components/FormField';
@@ -14,12 +14,20 @@ import {
   type OrderStatus,
 } from '@/lib/types';
 
+interface OrderComposerRequest {
+  requestId: string;
+  draft: OrderDraft;
+  notice?: string;
+}
+
 interface OrdersManagerPageProps {
   orders: Order[];
   loading: boolean;
   saving: boolean;
   error: Error | null;
   lastSyncAt: string | null;
+  composerRequest?: OrderComposerRequest | null;
+  onComposerRequestHandled?: () => void;
   onCreate: (payload: OrderDraft) => Promise<unknown>;
   onUpdate: (id: string, payload: OrderDraft) => Promise<unknown>;
   onDelete: (id: string) => Promise<unknown>;
@@ -54,6 +62,8 @@ export default function OrdersManagerPage({
   saving,
   error,
   lastSyncAt,
+  composerRequest = null,
+  onComposerRequestHandled,
   onCreate,
   onUpdate,
   onDelete,
@@ -61,6 +71,7 @@ export default function OrdersManagerPage({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [form, setForm] = useState<OrderDraft>(createEmptyOrderDraft());
+  const [composerNotice, setComposerNotice] = useState<string | null>(null);
 
   const sortedOrders = useMemo(
     () => [...orders].sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()),
@@ -75,12 +86,14 @@ export default function OrdersManagerPage({
   const openCreateModal = () => {
     setEditingOrder(null);
     setForm(createEmptyOrderDraft());
+    setComposerNotice(null);
     setIsModalOpen(true);
   };
 
   const openEditModal = (order: Order) => {
     setEditingOrder(order);
     setForm(cloneDraft(order));
+    setComposerNotice(null);
     setIsModalOpen(true);
   };
 
@@ -92,7 +105,29 @@ export default function OrdersManagerPage({
     setIsModalOpen(false);
     setEditingOrder(null);
     setForm(createEmptyOrderDraft());
+    setComposerNotice(null);
   };
+
+  useEffect(() => {
+    if (!composerRequest) {
+      return;
+    }
+
+    setEditingOrder(null);
+    setForm({
+      orderNumber: composerRequest.draft.orderNumber,
+      status: composerRequest.draft.status,
+      notes: composerRequest.draft.notes,
+      items: composerRequest.draft.items.map((item) => ({
+        itemName: item.itemName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      })),
+    });
+    setComposerNotice(composerRequest.notice ?? null);
+    setIsModalOpen(true);
+    onComposerRequestHandled?.();
+  }, [composerRequest, onComposerRequestHandled]);
 
   const updateItem = (index: number, patch: Partial<OrderItemDraft>) => {
     setForm((current) => ({
@@ -302,6 +337,12 @@ export default function OrdersManagerPage({
           </div>
         }
       >
+        {composerNotice ? (
+          <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {composerNotice}
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <FormField label="発注番号">
             <input
