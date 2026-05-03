@@ -24,7 +24,7 @@ interface ProtocolStepFormState {
   description: string;
   duration: string;
   materials: string[];
-  materialInput: string;
+  selectedInventoryMaterial: string;
   newMaterialInput: string;
 }
 
@@ -79,7 +79,7 @@ function createStepFormState(step: Partial<Omit<ProtocolStepFormState, 'id'>> = 
     description: step.description ?? '',
     duration: step.duration ?? '',
     materials: step.materials ?? [],
-    materialInput: step.materialInput ?? '',
+    selectedInventoryMaterial: step.selectedInventoryMaterial ?? '',
     newMaterialInput: step.newMaterialInput ?? '',
   };
 }
@@ -146,24 +146,18 @@ function normalizeMaterialValue(value: string) {
   return value.trim().replace(/\s+/g, ' ');
 }
 
-function buildMaterialSuggestions(
+function buildSelectableInventoryMaterials(
   inventoryNames: string[],
-  materialInput: string,
   selectedMaterials: string[],
 ) {
-  const normalizedInput = normalizeMaterialValue(materialInput).toLowerCase();
   const selected = new Set(selectedMaterials.map((material) => normalizeMaterialValue(material).toLowerCase()));
-
-  if (!normalizedInput) {
-    return [];
-  }
 
   return inventoryNames
     .filter((name) => {
       const normalizedName = normalizeMaterialValue(name).toLowerCase();
-      return normalizedName.includes(normalizedInput) && !selected.has(normalizedName);
+      return !selected.has(normalizedName);
     })
-    .slice(0, 8);
+    .sort((left, right) => left.localeCompare(right, 'ja'));
 }
 
 export default function ProtocolsManagerPage({
@@ -234,7 +228,7 @@ export default function ProtocolsManagerPage({
   const addMaterialToStep = (
     stepId: string,
     rawMaterial?: string,
-    sourceField: 'materialInput' | 'newMaterialInput' = 'materialInput',
+    sourceField: 'selectedInventoryMaterial' | 'newMaterialInput' = 'selectedInventoryMaterial',
   ) => {
     setForm((current) => ({
       ...current,
@@ -256,7 +250,8 @@ export default function ProtocolsManagerPage({
         return {
           ...step,
           materials: hasDuplicate ? step.materials : [...step.materials, nextMaterial],
-          materialInput: sourceField === 'materialInput' ? '' : step.materialInput,
+          selectedInventoryMaterial:
+            sourceField === 'selectedInventoryMaterial' ? '' : step.selectedInventoryMaterial,
           newMaterialInput: sourceField === 'newMaterialInput' ? '' : step.newMaterialInput,
         };
       }),
@@ -654,67 +649,40 @@ export default function ProtocolsManagerPage({
                   <FormField label="使用材料">
                     <div className="space-y-3">
                       <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                        <div className="mb-3 text-xs font-medium text-slate-500">在庫から検索して追加</div>
+                        <div className="mb-3 text-xs font-medium text-slate-500">在庫から選んで追加</div>
                         <div className="flex flex-col gap-2 sm:flex-row">
-                          <input
-                            value={step.materialInput}
-                            onChange={(event) => updateStep(step.id, { materialInput: event.target.value })}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                const suggestions = buildMaterialSuggestions(
-                                  inventoryMaterialNames,
-                                  step.materialInput,
-                                  step.materials,
-                                );
-                                if (suggestions.length > 0) {
-                                  addMaterialToStep(step.id, suggestions[0], 'materialInput');
-                                }
-                              }
-                            }}
-                            placeholder="在庫名で検索"
+                          <select
+                            value={step.selectedInventoryMaterial}
+                            onChange={(event) => updateStep(step.id, { selectedInventoryMaterial: event.target.value })}
                             className={inputClassName}
-                          />
+                          >
+                            <option value="">在庫から試薬を選択</option>
+                            {buildSelectableInventoryMaterials(inventoryMaterialNames, step.materials).map((material) => (
+                              <option key={`${step.id}-select-${material}`} value={material}>
+                                {material}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             type="button"
                             onClick={() => {
-                              const suggestions = buildMaterialSuggestions(
-                                inventoryMaterialNames,
-                                step.materialInput,
-                                step.materials,
-                              );
-                              if (suggestions.length > 0) {
-                                addMaterialToStep(step.id, suggestions[0], 'materialInput');
+                              if (step.selectedInventoryMaterial) {
+                                addMaterialToStep(step.id, step.selectedInventoryMaterial, 'selectedInventoryMaterial');
                               }
                             }}
                             className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                           >
-                            候補を追加
+                            選択した試薬を追加
                           </button>
                         </div>
 
-                        {step.materialInput.trim() ? (
-                          buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).length > 0 ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).map((material) => (
-                                <button
-                                  key={`${step.id}-suggestion-${material}`}
-                                  type="button"
-                                  onClick={() => addMaterialToStep(step.id, material, 'materialInput')}
-                                  className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
-                                >
-                                  {material}
-                                </button>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="mt-3 text-xs text-slate-400">
-                              一致する在庫が見つかりません。必要なら下の「新しい試薬名を追加」を使ってください。
-                            </div>
-                          )
+                        {inventoryMaterialNames.length > 0 ? (
+                          <div className="mt-3 text-xs text-slate-400">
+                            既存在庫から選んで追加できます。候補にない場合は下の「新しい試薬名を追加」を使ってください。
+                          </div>
                         ) : (
                           <div className="mt-3 text-xs text-slate-400">
-                            試薬名を入力すると、今ある在庫候補がここに出ます。
+                            まだ在庫名が登録されていません。下の「新しい試薬名を追加」を使ってください。
                           </div>
                         )}
                       </div>
