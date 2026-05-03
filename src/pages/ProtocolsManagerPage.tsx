@@ -25,6 +25,7 @@ interface ProtocolStepFormState {
   duration: string;
   materials: string[];
   materialInput: string;
+  newMaterialInput: string;
 }
 
 interface ProtocolFormState {
@@ -79,6 +80,7 @@ function createStepFormState(step: Partial<Omit<ProtocolStepFormState, 'id'>> = 
     duration: step.duration ?? '',
     materials: step.materials ?? [],
     materialInput: step.materialInput ?? '',
+    newMaterialInput: step.newMaterialInput ?? '',
   };
 }
 
@@ -229,7 +231,11 @@ export default function ProtocolsManagerPage({
     }));
   };
 
-  const addMaterialToStep = (stepId: string, rawMaterial?: string) => {
+  const addMaterialToStep = (
+    stepId: string,
+    rawMaterial?: string,
+    sourceField: 'materialInput' | 'newMaterialInput' = 'materialInput',
+  ) => {
     setForm((current) => ({
       ...current,
       steps: current.steps.map((step) => {
@@ -237,7 +243,7 @@ export default function ProtocolsManagerPage({
           return step;
         }
 
-        const nextMaterial = normalizeMaterialValue(rawMaterial ?? step.materialInput);
+        const nextMaterial = normalizeMaterialValue(rawMaterial ?? step[sourceField]);
 
         if (!nextMaterial) {
           return step;
@@ -250,7 +256,8 @@ export default function ProtocolsManagerPage({
         return {
           ...step,
           materials: hasDuplicate ? step.materials : [...step.materials, nextMaterial],
-          materialInput: '',
+          materialInput: sourceField === 'materialInput' ? '' : step.materialInput,
+          newMaterialInput: sourceField === 'newMaterialInput' ? '' : step.newMaterialInput,
         };
       }),
     }));
@@ -646,45 +653,96 @@ export default function ProtocolsManagerPage({
                 <div className="mt-4">
                   <FormField label="使用材料">
                     <div className="space-y-3">
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <input
-                          value={step.materialInput}
-                          onChange={(event) => updateStep(step.id, { materialInput: event.target.value })}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault();
-                              addMaterialToStep(step.id);
-                            }
-                          }}
-                          placeholder="試薬名を入力して Enter または追加"
-                          className={inputClassName}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => addMaterialToStep(step.id)}
-                          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                        >
-                          追加
-                        </button>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="mb-3 text-xs font-medium text-slate-500">在庫から検索して追加</div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            value={step.materialInput}
+                            onChange={(event) => updateStep(step.id, { materialInput: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                const suggestions = buildMaterialSuggestions(
+                                  inventoryMaterialNames,
+                                  step.materialInput,
+                                  step.materials,
+                                );
+                                if (suggestions.length > 0) {
+                                  addMaterialToStep(step.id, suggestions[0], 'materialInput');
+                                }
+                              }
+                            }}
+                            placeholder="在庫名で検索"
+                            className={inputClassName}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const suggestions = buildMaterialSuggestions(
+                                inventoryMaterialNames,
+                                step.materialInput,
+                                step.materials,
+                              );
+                              if (suggestions.length > 0) {
+                                addMaterialToStep(step.id, suggestions[0], 'materialInput');
+                              }
+                            }}
+                            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                          >
+                            候補を追加
+                          </button>
+                        </div>
+
+                        {step.materialInput.trim() ? (
+                          buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).map((material) => (
+                                <button
+                                  key={`${step.id}-suggestion-${material}`}
+                                  type="button"
+                                  onClick={() => addMaterialToStep(step.id, material, 'materialInput')}
+                                  className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
+                                >
+                                  {material}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-3 text-xs text-slate-400">
+                              一致する在庫が見つかりません。必要なら下の「新しい試薬名を追加」を使ってください。
+                            </div>
+                          )
+                        ) : (
+                          <div className="mt-3 text-xs text-slate-400">
+                            試薬名を入力すると、今ある在庫候補がここに出ます。
+                          </div>
+                        )}
                       </div>
 
-                      {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).length > 0 ? (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                          <div className="mb-2 text-xs font-medium text-slate-500">在庫から候補を追加</div>
-                          <div className="flex flex-wrap gap-2">
-                            {buildMaterialSuggestions(inventoryMaterialNames, step.materialInput, step.materials).map((material) => (
-                              <button
-                                key={`${step.id}-suggestion-${material}`}
-                                type="button"
-                                onClick={() => addMaterialToStep(step.id, material)}
-                                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
-                              >
-                                {material}
-                              </button>
-                            ))}
-                          </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="mb-3 text-xs font-medium text-slate-500">新しい試薬名を追加</div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            value={step.newMaterialInput}
+                            onChange={(event) => updateStep(step.id, { newMaterialInput: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                addMaterialToStep(step.id, undefined, 'newMaterialInput');
+                              }
+                            }}
+                            placeholder="まだ在庫にない試薬名を入力"
+                            className={inputClassName}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => addMaterialToStep(step.id, undefined, 'newMaterialInput')}
+                            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                          >
+                            新規追加
+                          </button>
                         </div>
-                      ) : null}
+                      </div>
 
                       <div className="rounded-2xl border border-slate-200 bg-white p-3">
                         <div className="mb-2 text-xs font-medium text-slate-500">登録済み試薬</div>
